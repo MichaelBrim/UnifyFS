@@ -77,8 +77,36 @@ AC_CHECK_FUNCS([ftruncate gettimeofday memset socket floor])
 AC_CHECK_FUNCS([gethostbyname strcasecmp strdup strerror strncasecmp strrchr])
 AC_CHECK_FUNCS([gethostname strstr strtoumax strtol uname posix_fallocate])
 
+# Linker Wrapping
+AC_ARG_ENABLE([link-wrap],
+              [AS_HELP_STRING([--enable-link-wrap],
+              [Enable linker wrapping method of I/O interception.])])
+AS_IF([test "x$enable_link_wrap" = "xyes"],[
+    AC_MSG_CHECKING(if linker supports -wrap)
+    OLD_LDFLAGS=$LDFLAGS
+    LDFLAGS=$LDFLAGS
+    LDFLAGS+=" -Wl,-wrap,malloc"
+    AC_LINK_IFELSE(
+      [AC_LANG_PROGRAM([[#include <stdlib.h>]],[[void* __wrap_malloc(size_t size);]],[[int *test = malloc(sizeof(int));]])],
+      [
+        AC_MSG_RESULT([yes])
+        AM_CONDITIONAL([HAVE_LD_WRAP],[true])
+        AM_CONDITIONAL([USE_LINK_WRAP], [true])
+      ],[
+        AC_MSG_RESULT([no])
+        AM_CONDITIONAL([HAVE_LD_WRAP],[false])
+        AM_CONDITIONAL([USE_LINK_WRAP], [false])
+      ])
+    LDFLAGS=$OLD_LDFLAGS
+],[
+    AM_CONDITIONAL([HAVE_LD_WRAP],[false])
+    AM_CONDITIONAL([USE_LINK_WRAP], [false])
+])
+
 # PMPI Init/Fini mount/unmount option
-AC_ARG_ENABLE([mpi-mount],[AS_HELP_STRING([--enable-mpi-mount],[Enable transparent mount/unmount at MPI_Init/Finalize.])])
+AC_ARG_ENABLE([mpi-mount],
+              [AS_HELP_STRING([--enable-mpi-mount],
+              [Enable transparent mount/unmount at MPI_Init/Finalize.])])
 AS_IF([test "x$enable_mpi_mount" = "xyes"],[
     AM_CONDITIONAL([USE_PMPI_WRAPPERS], [true])
 ],[
@@ -86,7 +114,9 @@ AS_IF([test "x$enable_mpi_mount" = "xyes"],[
 ])
 
 # PMIx support build option
-AC_ARG_ENABLE([pmix],[AS_HELP_STRING([--enable-pmix],[Enable PMIx build options.])])
+AC_ARG_ENABLE([pmix],
+              [AS_HELP_STRING([--enable-pmix],
+              [Enable PMIx build options.])])
 AS_IF([test "x$enable_pmix" = "xyes"],[
     AC_CHECK_HEADERS([pmix.h],
                      [AM_CONDITIONAL([USE_PMIX], [true])],
@@ -96,7 +126,9 @@ AS_IF([test "x$enable_pmix" = "xyes"],[
 ])
 
 # PMI2 support build option
-AC_ARG_ENABLE([pmi],[AS_HELP_STRING([--enable-pmi],[Enable PMI2 build options.])])
+AC_ARG_ENABLE([pmi],
+              [AS_HELP_STRING([--enable-pmi],
+              [Enable PMI2 build options.])])
 AS_IF([test "x$enable_pmi" = "xyes"],[
     AC_CHECK_HEADERS([pmi2.h],
                      [AM_CONDITIONAL([USE_PMI2], [true])],
@@ -113,7 +145,9 @@ AC_SUBST(pkgconfigdir)
 
 ## unifyfs options
 
-AC_ARG_ENABLE(preload,[AS_HELP_STRING([--enable-preload],[Enables support for LD_PRELOAD library])])
+AC_ARG_ENABLE(preload,
+              [AS_HELP_STRING([--enable-preload],
+              [Enables support for LD_PRELOAD library])])
 AS_IF([test "x$enable_preload" = "xyes"],[
     AM_CONDITIONAL([ENABLE_LD_PRELOAD],[true])
 ],[
@@ -171,21 +205,6 @@ AC_TRY_COMPILE(
     AC_DEFINE(HAVE_OFF64_T, 1, Define if off64_t type is defined),
     AC_MSG_RESULT(no)
 )
-
-AC_MSG_CHECKING(if linker supports -wrap)
-OLD_LDFLAGS=$LDFLAGS
-LDFLAGS=$LDFLAGS
-LDFLAGS+=" -Wl,-wrap,malloc"
-AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdlib.h>]],[[void* __wrap_malloc(size_t size);]],[[int *test = malloc(sizeof(int));]])],
-[
-    AC_MSG_RESULT([yes])
-    AM_CONDITIONAL([HAVE_LD_WRAP],[true])
-],[
-    AC_MSG_RESULT([no])
-    AM_CONDITIONAL([HAVE_LD_WRAP],[false])
-])
-LDFLAGS=$OLD_LDFLAGS
-
 
 # HDF found?
 AX_LIB_HDF5
@@ -246,11 +265,15 @@ LINK_WRAPPERS+=",-wrap,msync"
 LINK_WRAPPERS+=",-wrap,munmap"
 
 # status functions
-LINK_WRAPPERS+=",-wrap,fstat"
+AC_CHECK_FUNCS(fstat,[
+    LINK_WRAPPERS+=",-wrap,fstat"
+],[])
 AC_CHECK_FUNCS(fstat64,[
     LINK_WRAPPERS+=",-wrap,fstat64"
 ],[])
-LINK_WRAPPERS+=",-wrap,stat"
+AC_CHECK_FUNCS(stat,[
+    LINK_WRAPPERS+=",-wrap,stat"
+],[])
 AC_CHECK_FUNCS(stat64,[
     LINK_WRAPPERS+=",-wrap,stat64"
 ],[])
@@ -281,15 +304,17 @@ AC_CHECK_FUNCS(__fxstat64,[
     LINK_WRAPPERS+=",-wrap,__fxstat64"
 ],[])
 
-AC_CHECK_FUNCS(posix_fadvise, [
+AC_CHECK_FUNCS(posix_fadvise,[
     LINK_WRAPPERS+=",-wrap,posix_fadvise"
 ],[])
 
 # directory functions
 LINK_WRAPPERS+=",-wrap,chdir"
 LINK_WRAPPERS+=",-wrap,fchdir"
-LINK_WRAPPERS+=",-wrap,__getcwd_chk"
 LINK_WRAPPERS+=",-wrap,getcwd"
+AC_CHECK_FUNCS(__getcwd_chk,[
+    LINK_WRAPPERS+=",-wrap,__getcwd_chk"
+],[])
 LINK_WRAPPERS+=",-wrap,getwd"
 LINK_WRAPPERS+=",-wrap,get_current_dir_name"
 LINK_WRAPPERS+=",-wrap,mkdir"
@@ -374,7 +399,7 @@ fi
 
 AC_SUBST(unifyfs_lib_path)
 AC_SUBST(unifyfs_bin_path)
-AC_SUBST(LINK_WRAPPERS)
+AM_COND_IF([USE_LINK_WRAP],[AC_SUBST(LINK_WRAPPERS)],[])
 
 AC_CONFIG_FILES([Makefile
                  server/Makefile

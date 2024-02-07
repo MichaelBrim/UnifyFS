@@ -22,8 +22,7 @@ stage_ldadd = \
   $(MPI_CLDFLAGS)
 
 stage_ldflags = \
-  $(AM_LDFLAGS) \
-  -static
+  $(AM_LDFLAGS)
 
 # Per-target flags begin here
 

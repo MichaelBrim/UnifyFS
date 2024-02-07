@@ -13,13 +13,16 @@ TESTS += \
   0200-stdio-gotcha.t
 endif #HAVE_GOTCHA
 
+if USE_LINK_WRAP
 TESTS += \
   0500-sysio-static.t \
   0510-statfs-static.t \
-  0600-stdio-static.t \
+  0600-stdio-static.t
+endif #USE_LINK_WRAP
+
+TESTS += \
   0700-unifyfs-stage-full.t \
   8000-library-api.t \
-  9005-unifyfs-unmount.t \
   9010-stop-unifyfsd.t \
   9020-mountpoint-empty.t \
   9200-seg-tree-test.t \
@@ -42,11 +45,7 @@ clean-local:
 libexec_PROGRAMS = \
   api/api_test.t \
   common/seg_tree_test.t \
-  common/slotmap_test.t \
-  std/stdio-static.t \
-  sys/statfs-static.t \
-  sys/sysio-static.t \
-  unifyfs_unmount.t
+  common/slotmap_test.t
 
 if HAVE_GOTCHA
 libexec_PROGRAMS += \
@@ -55,8 +54,14 @@ libexec_PROGRAMS += \
   sys/sysio-gotcha.t
 endif
 
-# Compile/link flag definitions
+if USE_LINK_WRAP
+libexec_PROGRAMS += \
+  std/stdio-static.t \
+  sys/statfs-static.t \
+  sys/sysio-static.t
+endif
 
+# Compile/link flag definitions
 test_cppflags = \
   -I$(top_srcdir) \
   -I$(top_srcdir)/client/src \
@@ -100,8 +105,7 @@ test_wrap_ldadd = \
 
 test_wrap_ldflags = \
   $(AM_LDFLAGS) \
-  $(LINK_WRAPPERS) \
-  -static
+  $(LINK_WRAPPERS)
 
 # Per-target flags begin here
 
@@ -179,11 +183,6 @@ std_stdio_static_t_CPPFLAGS = $(test_cppflags)
 std_stdio_static_t_LDADD    = $(test_wrap_ldadd)
 std_stdio_static_t_LDFLAGS  = $(test_wrap_ldflags)
 std_stdio_static_t_SOURCES  = $(test_stdio_sources)
-
-unifyfs_unmount_t_CPPFLAGS = $(test_cppflags)
-unifyfs_unmount_t_LDADD    = $(test_wrap_ldadd)
-unifyfs_unmount_t_LDFLAGS  = $(test_wrap_ldflags)
-unifyfs_unmount_t_SOURCES  = unifyfs_unmount.c
 
 common_seg_tree_test_t_CPPFLAGS = $(test_cppflags) $(MARGO_CFLAGS)
 common_seg_tree_test_t_LDADD    = $(test_common_ldadd)
