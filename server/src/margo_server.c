@@ -151,110 +151,115 @@ static margo_instance_id setup_remote_target(void)
 static void register_server_server_rpcs(margo_instance_id mid)
 {
     unifyfsd_rpc_context->rpcs.bcast_progress_id =
-        MARGO_REGISTER(mid, "bcast_progress_rpc",
-                       bcast_progress_in_t, bcast_progress_out_t,
-                       bcast_progress_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "bcast_progress_rpc",
+            bcast_progress_in_t, bcast_progress_out_t, bcast_progress_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.bootstrap_complete_bcast_id =
-        MARGO_REGISTER(mid, "bootstrap_complete_bcast_rpc",
-                       bootstrap_complete_bcast_in_t,
-                       bootstrap_complete_bcast_out_t,
-                       bootstrap_complete_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "bootstrap_complete_bcast_rpc",
+            bootstrap_complete_bcast_in_t, bootstrap_complete_bcast_out_t,
+            bootstrap_complete_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.chunk_read_request_id =
-        MARGO_REGISTER(mid, "chunk_read_request_rpc",
-                       chunk_read_request_in_t, chunk_read_request_out_t,
-                       chunk_read_request_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "chunk_read_request_rpc",
+            chunk_read_request_in_t, chunk_read_request_out_t,
+            chunk_read_request_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.chunk_read_response_id =
-        MARGO_REGISTER(mid, "chunk_read_response_rpc",
-                       chunk_read_response_in_t, chunk_read_response_out_t,
-                       chunk_read_response_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "chunk_read_response_rpc",
+            chunk_read_response_in_t, chunk_read_response_out_t,
+            chunk_read_response_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.extent_add_id =
-        MARGO_REGISTER(mid, "add_extents_rpc",
-                       add_extents_in_t, add_extents_out_t,
-                       add_extents_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "add_extents_rpc",
+            add_extents_in_t, add_extents_out_t, add_extents_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.extent_bcast_id =
-        MARGO_REGISTER(mid, "extent_bcast_rpc",
-                       extent_bcast_in_t, extent_bcast_out_t,
-                       extent_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "extent_bcast_rpc",
+            extent_bcast_in_t, extent_bcast_out_t, extent_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.extent_lookup_id =
-        MARGO_REGISTER(mid, "find_extents_rpc",
-                       find_extents_in_t, find_extents_out_t,
-                       find_extents_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "find_extents_rpc",
+            find_extents_in_t, find_extents_out_t, find_extents_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.fileattr_bcast_id =
-        MARGO_REGISTER(mid, "fileattr_bcast_rpc",
-                       fileattr_bcast_in_t, fileattr_bcast_out_t,
-                       fileattr_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "fileattr_bcast_rpc",
+            fileattr_bcast_in_t, fileattr_bcast_out_t, fileattr_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.filesize_id =
-        MARGO_REGISTER(mid, "filesize_rpc",
-                       filesize_in_t, filesize_out_t,
-                       filesize_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "filesize_rpc",
+            filesize_in_t, filesize_out_t, filesize_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.laminate_id =
-        MARGO_REGISTER(mid, "laminate_rpc",
-                       laminate_in_t, laminate_out_t,
-                       laminate_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "laminate_rpc",
+            laminate_in_t, laminate_out_t, laminate_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.laminate_bcast_id =
-        MARGO_REGISTER(mid, "laminate_bcast_rpc",
-                       laminate_bcast_in_t, laminate_bcast_out_t,
-                       laminate_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "laminate_bcast_rpc",
+            laminate_bcast_in_t, laminate_bcast_out_t, laminate_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.metaget_id =
-        MARGO_REGISTER(mid, "metaget_rpc",
-                       metaget_in_t, metaget_out_t,
-                       metaget_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "metaget_rpc",
+            metaget_in_t, metaget_out_t, metaget_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.metaset_id =
-        MARGO_REGISTER(mid, "metaset_rpc",
-                       metaset_in_t, metaset_out_t,
-                       metaset_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "metaset_rpc",
+            metaset_in_t, metaset_out_t, metaset_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.server_pid_id =
-        MARGO_REGISTER(mid, "server_pid_rpc",
-                       server_pid_in_t, server_pid_out_t,
-                       server_pid_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "server_pid_rpc",
+            server_pid_in_t, server_pid_out_t, server_pid_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.transfer_id =
-        MARGO_REGISTER(mid, "transfer_rpc",
-                       transfer_in_t, transfer_out_t,
-                       transfer_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "transfer_rpc",
+            transfer_in_t, transfer_out_t, transfer_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.transfer_bcast_id =
-        MARGO_REGISTER(mid, "transfer_bcast_rpc",
-                       transfer_bcast_in_t, transfer_bcast_out_t,
-                       transfer_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "transfer_bcast_rpc",
+            transfer_bcast_in_t, transfer_bcast_out_t, transfer_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.truncate_id =
-        MARGO_REGISTER(mid, "truncate_rpc",
-                       truncate_in_t, truncate_out_t,
-                       truncate_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "truncate_rpc",
+            truncate_in_t, truncate_out_t, truncate_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.truncate_bcast_id =
-        MARGO_REGISTER(mid, "truncate_bcast_rpc",
-                       truncate_bcast_in_t, truncate_bcast_out_t,
-                       truncate_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "truncate_bcast_rpc",
+            truncate_bcast_in_t, truncate_bcast_out_t, truncate_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.unlink_bcast_id =
-        MARGO_REGISTER(mid, "unlink_bcast_rpc",
-                       unlink_bcast_in_t, unlink_bcast_out_t,
-                       unlink_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "unlink_bcast_rpc",
+            unlink_bcast_in_t, unlink_bcast_out_t, unlink_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.node_local_extents_get_id =
-       MARGO_REGISTER(mid, "unifyfs_node_local_extents_get_rpc",
-                      unifyfs_node_local_extents_get_in_t,
-                      unifyfs_node_local_extents_get_out_t,
-                      unifyfs_node_local_extents_get_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "unifyfs_node_local_extents_get_rpc",
+            unifyfs_node_local_extents_get_in_t,
+            unifyfs_node_local_extents_get_out_t,
+            unifyfs_node_local_extents_get_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
+
     unifyfsd_rpc_context->rpcs.metaget_all_bcast_id =
-        MARGO_REGISTER(mid, "metaget_all_bcast_rpc",
-                       metaget_all_bcast_in_t, metaget_all_bcast_out_t,
-                       metaget_all_bcast_rpc);
+        MARGO_REGISTER_PROVIDER(mid, "metaget_all_bcast_rpc",
+            metaget_all_bcast_in_t, metaget_all_bcast_out_t,
+            metaget_all_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 }
 
 /* setup_local_target - Initializes the client-server margo target */
@@ -438,6 +443,23 @@ int margo_server_rpc_init(void)
         rc = UNIFYFS_ERROR_MARGO;
     } else {
         unifyfsd_rpc_context->svr_mid = mid;
+        margo_get_handler_pool(mid, &(unifyfsd_rpc_context->svr_rpc_pool));
+
+        /* create a dedicated xstream+pool for collectives and transfers */
+        ABT_xstream coll_xstream, xfer_xstream;
+        ABT_pool coll_pool, xfer_pool;
+        rc = ABT_xstream_create(ABT_SCHED_NULL, &coll_xstream);
+        assert(rc == 0);
+        rc = ABT_xstream_get_main_pools(coll_xstream, 1, &coll_pool);
+        assert(rc == 0);
+        unifyfsd_rpc_context->svr_coll_pool = coll_pool;
+
+        rc = ABT_xstream_create(ABT_SCHED_NULL, &xfer_xstream);
+        assert(rc == 0);
+        rc = ABT_xstream_get_main_pools(xfer_xstream, 1, &xfer_pool);
+        assert(rc == 0);
+        unifyfsd_rpc_context->svr_xfer_pool = xfer_pool;
+
         register_server_server_rpcs(mid);
     }
 
