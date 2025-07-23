@@ -75,6 +75,12 @@ UNIFYFS_DEF(stat, int,
 UNIFYFS_DEF(stat64, int,
             (const char* path, struct stat64* buf),
             (path, buf))
+UNIFYFS_DEF(lstat, int,
+            (const char* path, struct stat* buf),
+            (path, buf))
+UNIFYFS_DEF(lstat64, int,
+            (const char* path, struct stat64* buf),
+            (path, buf))
 UNIFYFS_DEF(fstat, int,
             (int fd, struct stat* buf),
             (fd, buf))
@@ -385,6 +391,8 @@ struct gotcha_binding_t unifyfs_wrappers[] = {
 
     { "stat", UNIFYFS_WRAP(stat), &wrappee_handle_stat },
     { "stat64", UNIFYFS_WRAP(stat64), &wrappee_handle_stat64 },
+    { "lstat", UNIFYFS_WRAP(lstat), &wrappee_handle_lstat },
+    { "lstat64", UNIFYFS_WRAP(lstat64), &wrappee_handle_lstat64 },
     { "fstat", UNIFYFS_WRAP(fstat), &wrappee_handle_fstat },
     { "fstat64", UNIFYFS_WRAP(fstat64), &wrappee_handle_fstat64 },
     { "__xstat", UNIFYFS_WRAP(__xstat), &wrappee_handle___xstat },

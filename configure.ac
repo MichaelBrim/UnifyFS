@@ -250,9 +250,17 @@ LINK_WRAPPERS+=",-wrap,fstat"
 AC_CHECK_FUNCS(fstat64,[
     LINK_WRAPPERS+=",-wrap,fstat64"
 ],[])
+
 LINK_WRAPPERS+=",-wrap,stat"
 AC_CHECK_FUNCS(stat64,[
     LINK_WRAPPERS+=",-wrap,stat64"
+],[])
+
+AC_CHECK_FUNCS(lstat,[
+    LINK_WRAPPERS+=",-wrap,lstat"
+],[])
+AC_CHECK_FUNCS(lstat64,[
+    LINK_WRAPPERS+=",-wrap,lstat64"
 ],[])
 
 AC_CHECK_FUNCS(statfs,[
@@ -268,12 +276,14 @@ AC_CHECK_FUNCS(__lxstat,[
 AC_CHECK_FUNCS(__lxstat64,[
     LINK_WRAPPERS+=",-wrap,__lxstat64"
 ],[])
+
 AC_CHECK_FUNCS(__xstat,[
     LINK_WRAPPERS+=",-wrap,__xstat"
 ],[])
 AC_CHECK_FUNCS(__xstat64,[
     LINK_WRAPPERS+=",-wrap,__xstat64"
 ],[])
+
 AC_CHECK_FUNCS(__fxstat,[
     LINK_WRAPPERS+=",-wrap,__fxstat"
 ],[])

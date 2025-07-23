@@ -62,6 +62,8 @@ UNIFYFS_DECL(remove, int, (const char* path));
 UNIFYFS_DECL(rename, int, (const char* oldpath, const char* newpath));
 UNIFYFS_DECL(stat, int, (const char* path, struct stat* buf));
 UNIFYFS_DECL(stat64, int, (const char* path, struct stat64* buf));
+UNIFYFS_DECL(lstat, int, (const char* path, struct stat* buf));
+UNIFYFS_DECL(lstat64, int, (const char* path, struct stat64* buf));
 UNIFYFS_DECL(__xstat, int, (int vers, const char* path, struct stat* buf));
 UNIFYFS_DECL(__xstat64, int, (int vers, const char* path, struct stat64* buf));
 UNIFYFS_DECL(__lxstat, int, (int vers, const char* path, struct stat* buf));

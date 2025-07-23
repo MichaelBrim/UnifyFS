@@ -873,6 +873,40 @@ int UNIFYFS_WRAP(stat64)(const char* path, struct stat64* buf)
 }
 #endif
 
+#ifdef HAVE_LSTAT
+int UNIFYFS_WRAP(lstat)(const char* path, struct stat* buf)
+{
+    LOGDBG("lstat was called for %s", path);
+
+    char upath[UNIFYFS_MAX_FILENAME];
+    if (unifyfs_intercept_path(path, upath)) {
+        int ret = __stat(upath, buf);
+        return ret;
+    } else {
+        MAP_OR_FAIL(lstat);
+        int ret = UNIFYFS_REAL(lstat)(path, buf);
+        return ret;
+    }
+}
+#endif
+
+#ifdef HAVE_LSTAT64
+int UNIFYFS_WRAP(lstat64)(const char* path, struct stat64* buf)
+{
+    LOGDBG("lstat64 was called for %s", path);
+
+    char upath[UNIFYFS_MAX_FILENAME];
+    if (unifyfs_intercept_path(path, upath)) {
+        int ret = __stat64(upath, buf);
+        return ret;
+    } else {
+        MAP_OR_FAIL(lstat64);
+        int ret = UNIFYFS_REAL(lstat64)(path, buf);
+        return ret;
+    }
+}
+#endif
+
 int UNIFYFS_WRAP(fstat)(int fd, struct stat* buf)
 {
     LOGDBG("fstat was called for fd: %d", fd);
