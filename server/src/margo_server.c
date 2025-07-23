@@ -435,32 +435,33 @@ int margo_server_rpc_init(void)
         rc = UNIFYFS_ERROR_MARGO;
     } else {
         unifyfsd_rpc_context->shm_mid = mid;
-        register_client_server_rpcs(mid);
-    }
+        margo_get_handler_pool(mid, &(unifyfsd_rpc_context->shm_rpc_pool));
 
-    mid = setup_remote_target();
-    if (mid == MARGO_INSTANCE_NULL) {
-        rc = UNIFYFS_ERROR_MARGO;
-    } else {
-        unifyfsd_rpc_context->svr_mid = mid;
-        margo_get_handler_pool(mid, &(unifyfsd_rpc_context->svr_rpc_pool));
+        mid = setup_remote_target();
+        if (mid == MARGO_INSTANCE_NULL) {
+            rc = UNIFYFS_ERROR_MARGO;
+        } else {
+            unifyfsd_rpc_context->svr_mid = mid;
+            margo_get_handler_pool(mid, &(unifyfsd_rpc_context->svr_rpc_pool));
 
-        /* create a dedicated xstream+pool for collectives and transfers */
-        ABT_xstream coll_xstream, xfer_xstream;
-        ABT_pool coll_pool, xfer_pool;
-        rc = ABT_xstream_create(ABT_SCHED_NULL, &coll_xstream);
-        assert(rc == 0);
-        rc = ABT_xstream_get_main_pools(coll_xstream, 1, &coll_pool);
-        assert(rc == 0);
-        unifyfsd_rpc_context->svr_coll_pool = coll_pool;
+            /* create a dedicated xstream+pool for collectives and transfers */
+            ABT_xstream coll_xstream, xfer_xstream;
+            ABT_pool coll_pool, xfer_pool;
+            rc = ABT_xstream_create(ABT_SCHED_NULL, &coll_xstream);
+            assert(rc == 0);
+            rc = ABT_xstream_get_main_pools(coll_xstream, 1, &coll_pool);
+            assert(rc == 0);
+            unifyfsd_rpc_context->svr_coll_pool = coll_pool;
 
-        rc = ABT_xstream_create(ABT_SCHED_NULL, &xfer_xstream);
-        assert(rc == 0);
-        rc = ABT_xstream_get_main_pools(xfer_xstream, 1, &xfer_pool);
-        assert(rc == 0);
-        unifyfsd_rpc_context->svr_xfer_pool = xfer_pool;
+            rc = ABT_xstream_create(ABT_SCHED_NULL, &xfer_xstream);
+            assert(rc == 0);
+            rc = ABT_xstream_get_main_pools(xfer_xstream, 1, &xfer_pool);
+            assert(rc == 0);
+            unifyfsd_rpc_context->svr_xfer_pool = xfer_pool;
 
-        register_server_server_rpcs(mid);
+            register_client_server_rpcs(unifyfsd_rpc_context->shm_mid);
+            register_server_server_rpcs(unifyfsd_rpc_context->svr_mid);
+        }
     }
 
     return rc;
