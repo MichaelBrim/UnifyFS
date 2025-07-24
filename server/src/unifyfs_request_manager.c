@@ -933,7 +933,7 @@ static int process_attach_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_attach_in_t* in = req->input;
+    unifyfs_attach_in_t* in = req->req_state.inputs;
     assert(in != NULL);
 
     /* lookup client structure and attach it */
@@ -960,19 +960,19 @@ static int process_attach_rpc(reqmgr_thrd_t* reqmgr,
         ret = (int)UNIFYFS_FAILURE;
     }
 
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     /* send rpc response */
     unifyfs_attach_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -983,10 +983,10 @@ static int process_filesize_rpc(reqmgr_thrd_t* reqmgr,
     int ret = UNIFYFS_SUCCESS;
     size_t filesize = 0;
 
-    unifyfs_filesize_in_t* in = req->input;
+    unifyfs_filesize_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("getting filesize for gfid=%d", gfid);
@@ -1004,13 +1004,13 @@ static int process_filesize_rpc(reqmgr_thrd_t* reqmgr,
     unifyfs_filesize_out_t out;
     out.ret = (int32_t) ret;
     out.filesize = filesize;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1020,10 +1020,10 @@ static int process_fsync_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_fsync_in_t* in = req->input;
+    unifyfs_fsync_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGINFO("syncing gfid=%d", gfid);
@@ -1039,13 +1039,13 @@ static int process_fsync_rpc(reqmgr_thrd_t* reqmgr,
         /* send rpc response */
         unifyfs_fsync_out_t out;
         out.ret = (int32_t) ret;
-        hg_return_t hret = margo_respond(req->handle, &out);
+        hg_return_t hret = margo_respond(req->req_state.handle, &out);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed");
         }
 
         /* cleanup req */
-        margo_destroy(req->handle);
+        margo_destroy(req->req_state.handle);
     }
 
     return ret;
@@ -1056,10 +1056,10 @@ static int process_laminate_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_laminate_in_t* in = req->input;
+    unifyfs_laminate_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("laminating gfid=%d", gfid);
@@ -1076,13 +1076,13 @@ static int process_laminate_rpc(reqmgr_thrd_t* reqmgr,
     /* send rpc response */
     unifyfs_laminate_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1092,10 +1092,10 @@ static int process_metaget_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_metaget_in_t* in = req->input;
+    unifyfs_metaget_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("getting metadata for gfid=%d", gfid);
@@ -1115,13 +1115,13 @@ static int process_metaget_rpc(reqmgr_thrd_t* reqmgr,
     unifyfs_metaget_out_t out;
     out.ret = (int32_t) ret;
     out.attr = fattr;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1131,7 +1131,7 @@ static int process_metaset_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_metaset_in_t* in = req->input;
+    unifyfs_metaset_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->attr.gfid;
     int attr_op = (int) in->attr_op;
@@ -1151,8 +1151,8 @@ static int process_metaset_rpc(reqmgr_thrd_t* reqmgr,
      * called.  That said, in->attr.filename is allocated with strdup(), and
      * must therefore be freed before we free 'in'.
      */
-    if (HG_HANDLE_NULL != req->handle) {
-        margo_free_input(req->handle, in);
+    if (HG_HANDLE_NULL != req->req_state.handle) {
+        margo_free_input(req->req_state.handle, in);
     } else {
         if (NULL != in->attr.filename) {
             free(in->attr.filename);
@@ -1175,17 +1175,17 @@ static int process_metaset_rpc(reqmgr_thrd_t* reqmgr,
         free(fattr.filename);
     }
 
-    if (HG_HANDLE_NULL != req->handle) {
+    if (HG_HANDLE_NULL != req->req_state.handle) {
         /* send rpc response */
         unifyfs_metaset_out_t out;
         out.ret = (int32_t) ret;
-        hg_return_t hret = margo_respond(req->handle, &out);
+        hg_return_t hret = margo_respond(req->req_state.handle, &out);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed");
         }
 
         /* cleanup req */
-        margo_destroy(req->handle);
+        margo_destroy(req->req_state.handle);
     }
     return ret;
 }
@@ -1195,11 +1195,11 @@ static int process_read_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_mread_in_t* in = req->input;
+    unifyfs_mread_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int mread_id = in->mread_id;
     size_t read_count = in->read_count;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("processing mread[%d] with %zu requests", mread_id, read_count);
@@ -1209,22 +1209,22 @@ static int process_read_rpc(reqmgr_thrd_t* reqmgr,
         .client_id = reqmgr->client_id,
         .mread_id = mread_id
     };
-    ret = unifyfs_fops_mread(&ctx, read_count, req->bulk_buf);
+    ret = unifyfs_fops_mread(&ctx, read_count, req->req_state.bulk_buf);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("unifyfs_fops_read() failed");
     }
-    free(req->bulk_buf);
+    free(req->req_state.bulk_buf);
 
     /* send rpc response */
     unifyfs_mread_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1234,14 +1234,14 @@ static int process_transfer_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_transfer_in_t* in = req->input;
+    unifyfs_transfer_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int transfer_id = in->transfer_id;
     int gfid = in->gfid;
     int mode = (in->mode == 1 ? SERVER_TRANSFER_MODE_LOCAL
                               : SERVER_TRANSFER_MODE_OWNER);
     const char* dest_file = strdup(in->dst_file);
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("transferring gfid=%d to file %s", gfid, dest_file);
@@ -1260,13 +1260,13 @@ static int process_transfer_rpc(reqmgr_thrd_t* reqmgr,
     /* send rpc response */
     unifyfs_transfer_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1276,11 +1276,11 @@ static int process_truncate_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_truncate_in_t* in = req->input;
+    unifyfs_truncate_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
     size_t filesize = in->filesize;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("truncating gfid=%d, sz=%zu", gfid, filesize);
@@ -1297,13 +1297,13 @@ static int process_truncate_rpc(reqmgr_thrd_t* reqmgr,
     /* send rpc response */
     unifyfs_truncate_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1313,10 +1313,10 @@ static int process_unlink_rpc(reqmgr_thrd_t* reqmgr,
 {
     int ret = UNIFYFS_SUCCESS;
 
-    unifyfs_unlink_in_t* in = req->input;
+    unifyfs_unlink_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     int gfid = in->gfid;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
 
     LOGDBG("unlinking gfid=%d", gfid);
@@ -1333,13 +1333,13 @@ static int process_unlink_rpc(reqmgr_thrd_t* reqmgr,
     /* send rpc response */
     unifyfs_unlink_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->handle, &out);
+    hg_return_t hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
 
     return ret;
 }
@@ -1348,12 +1348,12 @@ static int process_node_local_extents_get_rpc(reqmgr_thrd_t* reqmgr,
                                               client_rpc_req_t* req)
 {
     int ret = UNIFYFS_SUCCESS;
-    unifyfs_node_local_extents_get_in_t* in = req->input;
+    unifyfs_node_local_extents_get_in_t* in = req->req_state.inputs;
     assert(in != NULL);
     size_t num_req = in->num_req;
-    margo_free_input(req->handle, in);
+    margo_free_input(req->req_state.handle, in);
     free(in);
-    unifyfs_extent_t* in_extents = (unifyfs_extent_t*) req->bulk_buf;
+    unifyfs_extent_t* in_extents = (unifyfs_extent_t*) req->req_state.bulk_buf;
     struct extents_list out_list;
     struct extents_list* out_list_cur = &out_list;
     size_t total_chunks = 0;
@@ -1389,7 +1389,7 @@ static int process_node_local_extents_get_rpc(reqmgr_thrd_t* reqmgr,
             free(chunks);
         }
     }
-    free(req->bulk_buf);
+    free(req->req_state.bulk_buf);
     /* prepare the response for node local extents get */
     unifyfs_node_local_extents_get_out_t out;
     hg_return_t hret = 0;
@@ -1414,7 +1414,7 @@ static int process_node_local_extents_get_rpc(reqmgr_thrd_t* reqmgr,
     out.bulk_size = extents_size;
 
     /* send rpc response */
-    hret = margo_respond(req->handle, &out);
+    hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
@@ -1426,7 +1426,7 @@ static int process_node_local_extents_get_rpc(reqmgr_thrd_t* reqmgr,
      * and it's safe to free the rpc params */
     margo_bulk_free(out.bulk_data);
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
     return ret;
 }
 
@@ -1477,13 +1477,13 @@ static int process_get_gfids(reqmgr_thrd_t* reqmgr,
 
     out.ret = (int32_t) ret;
     out.num_gfids = num_file_attrs;
-    hret = margo_respond(req->handle, &out);
+    hret = margo_respond(req->req_state.handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->handle);
+    margo_destroy(req->req_state.handle);
     margo_bulk_free(out.bulk_gfids);
     free(new_gfid_list);
 

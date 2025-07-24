@@ -29,24 +29,24 @@ int hash_gfid_to_server(int gfid)
 
 /* helper method to initialize peer request rpc handle */
 int init_p2p_request_handle(hg_id_t request_hgid,
-                           int peer_rank,
-                           p2p_request* req)
+                            int peer_rank,
+                            p2p_request* preq)
 {
     int rc = UNIFYFS_SUCCESS;
 
     /* get address for specified server rank */
-    req->peer = get_margo_server_address(peer_rank);
-    if (HG_ADDR_NULL == req->peer) {
+    preq->peer = get_margo_server_address(peer_rank);
+    if (HG_ADDR_NULL == preq->peer) {
         LOGERR("missing margo address for rank=%d", peer_rank);
         return UNIFYFS_ERROR_MARGO;
     }
 
     /* get handle to rpc function */
-    hg_return_t hret = margo_create(unifyfsd_rpc_context->svr_mid, req->peer,
-                                    request_hgid, &(req->handle));
+    hg_return_t hret = margo_create(unifyfsd_rpc_context->svr_mid, preq->peer,
+                                    request_hgid, &(preq->handle));
     if (hret != HG_SUCCESS) {
         LOGERR("failed to get handle for p2p request(%p) to server %d - %s",
-               req, peer_rank, HG_Error_to_string(hret));
+               preq, peer_rank, HG_Error_to_string(hret));
         rc = UNIFYFS_ERROR_MARGO;
     }
 
@@ -55,17 +55,17 @@ int init_p2p_request_handle(hg_id_t request_hgid,
 
 /* helper method to forward peer rpc request */
 int forward_p2p_request(void* input_ptr,
-                        p2p_request* req)
+                        p2p_request* preq)
 {
     int rc = UNIFYFS_SUCCESS;
 
     /* call rpc function */
     double timeout_ms = margo_server_server_timeout_msec;
-    hg_return_t hret = margo_iforward_timed(req->handle, input_ptr,
-                                            timeout_ms, &(req->request));
+    hg_return_t hret = margo_iforward_timed(preq->handle, input_ptr,
+                                            timeout_ms, &(preq->request));
     if (hret != HG_SUCCESS) {
         LOGERR("failed to forward p2p request(%p) - %s",
-               req, HG_Error_to_string(hret));
+               preq, HG_Error_to_string(hret));
         rc = UNIFYFS_ERROR_MARGO;
     }
 
@@ -73,15 +73,15 @@ int forward_p2p_request(void* input_ptr,
 }
 
 /* helper method to wait for peer rpc request completion */
-int wait_for_p2p_request(p2p_request* req)
+int wait_for_p2p_request(p2p_request* preq)
 {
     int rc = UNIFYFS_SUCCESS;
 
     /* call rpc function */
-    hg_return_t hret = margo_wait(req->request);
+    hg_return_t hret = margo_wait(preq->request);
     if (hret != HG_SUCCESS) {
         LOGERR("wait on p2p request(%p) failed - %s",
-               req, HG_Error_to_string(hret));
+               preq, HG_Error_to_string(hret));
         //margo_state_dump(unifyfsd_rpc_context->svr_mid, "-", 0, NULL);
         rc = UNIFYFS_ERROR_MARGO;
     }
@@ -200,17 +200,17 @@ static void chunk_read_request_rpc(hg_handle_t handle)
             size_t bulk_sz = (size_t)in->bulk_size;
             if (bulk_sz) {
                 /* allocate and register local target buffer for bulk access */
-                void* reqbuf = pull_margo_bulk_buffer(handle, in->bulk_handle,
+                void* reqbuf = pull_margo_bulk(handle, in->bulk_handle,
                                                      in->bulk_size, NULL);
                 if (NULL == reqbuf) {
                     LOGERR("failed to get bulk chunk reads");
                     ret = UNIFYFS_ERROR_MARGO;
                 } else {
                     req->req_type = UNIFYFS_SERVER_RPC_CHUNK_READ;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = reqbuf;
-                    req->bulk_sz = bulk_sz;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = reqbuf;
+                    req->req_state.bulk_sz = bulk_sz;
                     ret = sm_submit_service_request(req);
                 }
                 if (ret != UNIFYFS_SUCCESS) {
@@ -229,8 +229,8 @@ static void chunk_read_request_rpc(hg_handle_t handle)
             free(in);
         }
         if (NULL != req) {
-            if (NULL != req->bulk_buf) {
-                free(req->bulk_buf);
+            if (NULL != req->req_state.bulk_buf) {
+                free(req->req_state.bulk_buf);
             }
             free(req);
         }
@@ -368,7 +368,7 @@ static void chunk_read_response_rpc(hg_handle_t handle)
             ret = (int32_t)EINVAL;
         } else {
             /* allocate a buffer to hold the incoming data */
-            char* resp_buf = (char*) pull_margo_bulk_buffer(handle,
+            char* resp_buf = (char*) pull_margo_bulk(handle,
                                                            in.bulk_handle,
                                                            in.bulk_size,
                                                            NULL);
@@ -503,17 +503,17 @@ static void add_extents_rpc(hg_handle_t handle)
             size_t bulk_sz = num_extents * sizeof(extent_metadata);
 
             /* allocate memory for extents */
-            void* extents_buf = pull_margo_bulk_buffer(handle, in->extents,
+            void* extents_buf = pull_margo_bulk(handle, in->extents,
                                                        bulk_sz, NULL);
             if (NULL == extents_buf) {
                 LOGERR("failed to get bulk extents");
                 ret = UNIFYFS_ERROR_MARGO;
             } else {
                 req->req_type = UNIFYFS_SERVER_RPC_EXTENTS_ADD;
-                req->handle   = handle;
-                req->input    = (void*) in;
-                req->bulk_buf = extents_buf;
-                req->bulk_sz  = bulk_sz;
+                req->req_state.handle  = handle;
+                req->req_state.inputs    = (void*) in;
+                req->req_state.bulk_buf = extents_buf;
+                req->req_state.bulk_sz  = bulk_sz;
                 ret = sm_submit_service_request(req);
             }
             if (ret != UNIFYFS_SUCCESS) {
@@ -528,8 +528,8 @@ static void add_extents_rpc(hg_handle_t handle)
             free(in);
         }
         if (NULL != req) {
-            if (NULL != req->bulk_buf) {
-                free(req->bulk_buf);
+            if (NULL != req->req_state.bulk_buf) {
+                free(req->req_state.bulk_buf);
             }
             free(req);
         }
@@ -660,7 +660,7 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
             if (n_chks > 0) {
                 /* get bulk buffer with chunk locations */
                 buf_sz = (size_t)n_chks * sizeof(chunk_read_req_t);
-                buf = pull_margo_bulk_buffer(preq.handle, out.locations,
+                buf = pull_margo_bulk(preq.handle, out.locations,
                                              buf_sz, NULL);
                 if (NULL == buf) {
                     LOGERR("failed to get bulk chunk locations");
@@ -703,17 +703,17 @@ static void find_extents_rpc(hg_handle_t handle)
             size_t bulk_sz = num_extents * sizeof(unifyfs_extent_t);
 
             /* allocate memory for extents */
-            void* extents_buf = pull_margo_bulk_buffer(handle, in->extents,
+            void* extents_buf = pull_margo_bulk(handle, in->extents,
                                                       bulk_sz, NULL);
             if (NULL == extents_buf) {
                 LOGERR("failed to get bulk extents");
                 ret = UNIFYFS_ERROR_MARGO;
             } else {
                 req->req_type = UNIFYFS_SERVER_RPC_EXTENTS_FIND;
-                req->handle   = handle;
-                req->input    = (void*) in;
-                req->bulk_buf = extents_buf;
-                req->bulk_sz  = bulk_sz;
+                req->req_state.handle  = handle;
+                req->req_state.inputs    = (void*) in;
+                req->req_state.bulk_buf = extents_buf;
+                req->req_state.bulk_sz  = bulk_sz;
                 ret = sm_submit_service_request(req);
             }
             if (ret != UNIFYFS_SUCCESS) {
@@ -728,8 +728,8 @@ static void find_extents_rpc(hg_handle_t handle)
             free(in);
         }
         if (NULL != req) {
-            if (NULL != req->bulk_buf) {
-                free(req->bulk_buf);
+            if (NULL != req->req_state.bulk_buf) {
+                free(req->req_state.bulk_buf);
             }
             free(req);
         }
@@ -889,10 +889,10 @@ static void metaget_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_METAGET;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);
@@ -1053,10 +1053,10 @@ static void filesize_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_FILESIZE;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);
@@ -1174,10 +1174,10 @@ static void metaset_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_METASET;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);
@@ -1282,10 +1282,10 @@ static void laminate_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_LAMINATE;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);
@@ -1401,10 +1401,10 @@ static void transfer_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_TRANSFER;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);
@@ -1510,10 +1510,10 @@ static void truncate_rpc(hg_handle_t handle)
             ret = UNIFYFS_ERROR_MARGO;
         } else {
             req->req_type = UNIFYFS_SERVER_RPC_TRUNCATE;
-            req->handle   = handle;
-            req->input    = (void*) in;
-            req->bulk_buf = NULL;
-            req->bulk_sz  = 0;
+            req->req_state.handle  = handle;
+            req->req_state.inputs    = (void*) in;
+            req->req_state.bulk_buf = NULL;
+            req->req_state.bulk_sz  = 0;
             ret = sm_submit_service_request(req);
             if (ret != UNIFYFS_SUCCESS) {
                 margo_free_input(handle, in);

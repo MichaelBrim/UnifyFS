@@ -16,10 +16,13 @@
 #define UNIFYFS_UTIL_H
 
 #include <mercury_types.h>
+#include "unifyfs_rpc_types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// ========== publish/lookup of Mercury RPC addresses ==========
 
 /* publish the address of the server */
 void rpc_publish_local_server_addr(const char* addr);
@@ -32,12 +35,44 @@ char* rpc_lookup_remote_server_addr(int srv_rank);
 /* remove server rpc address file */
 void rpc_clean_local_server_addr(void);
 
+// ========== Margo RPC helper functions ==========
+
+char* get_margo_addr_str(margo_instance_id mid,
+                         hg_addr_t maddr);
+
+rpc_state* create_rpc_request(hg_id_t rpc_id,
+                                margo_instance_id mid,
+                                hg_addr_t maddr,
+                                void* input, size_t input_sz,
+                                void* output, size_t output_sz);
+
+rpc_state* create_rpc_response(hg_handle_t handle,
+                                 void* input,
+                                 void* output, size_t output_sz);
+
+int cleanup_rpc_state(rpc_state* rpc);
+
+int sync_rpc_request(rpc_state* rpc,
+                     int timeout_msec,
+                     int retry);
+
+int sync_rpc_response(rpc_state* rpc,
+                      int retry);
+
+int async_rpc_request(rpc_state* rpc,
+                      int timeout_msec);
+int async_rpc_request_finish(rpc_state* rpc);
+
+int async_rpc_response(rpc_state* rpc,
+                       int retry);
+int async_rpc_response_finish(rpc_state* rpc);
+
 /* use passed bulk handle to pull data into a newly allocated buffer.
  * returns buffer, or NULL on failure. */
-void* pull_margo_bulk_buffer(hg_handle_t rpc_hdl,
-                             hg_bulk_t bulk_in,
-                             hg_size_t bulk_sz,
-                             hg_bulk_t* local_bulk);
+void* pull_margo_bulk(hg_handle_t rpc_hdl,
+                      hg_bulk_t bulk_in,
+                      hg_size_t bulk_sz,
+                      hg_bulk_t* local_bulk);
 
 #ifdef __cplusplus
 } // extern "C"

@@ -901,8 +901,8 @@ static void bootstrap_complete_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");
@@ -1019,7 +1019,7 @@ static void extent_bcast_rpc(hg_handle_t handle)
             size_t num_extents = (size_t) in->num_extents;
             size_t bulk_sz = num_extents * sizeof(struct extent_metadata);
             hg_bulk_t local_bulk = HG_BULK_NULL;
-            void* extents_buf = pull_margo_bulk_buffer(handle, in->extents,
+            void* extents_buf = pull_margo_bulk(handle, in->extents,
                                                        bulk_sz, &local_bulk);
             if (NULL == extents_buf) {
                 LOGERR("failed to get bulk extents");
@@ -1040,10 +1040,10 @@ static void extent_bcast_rpc(hg_handle_t handle)
                     if (ret == UNIFYFS_SUCCESS) {
                         req->req_type = rpc;
                         req->coll = coll;
-                        req->handle = handle;
-                        req->input = (void*) in;
-                        req->bulk_buf = extents_buf;
-                        req->bulk_sz = bulk_sz;
+                        req->req_state.handle = handle;
+                        req->req_state.inputs = (void*) in;
+                        req->req_state.bulk_buf = extents_buf;
+                        req->req_state.bulk_sz = bulk_sz;
                         ret = sm_submit_service_request(req);
                         if (ret != UNIFYFS_SUCCESS) {
                             LOGERR("failed to submit coll request to svcmgr");
@@ -1170,7 +1170,7 @@ static void laminate_bcast_rpc(hg_handle_t handle)
             size_t n_extents = (size_t) in->num_extents;
             size_t bulk_sz = n_extents * sizeof(struct extent_metadata);
             hg_bulk_t local_bulk = HG_BULK_NULL;
-            void* extents_buf = pull_margo_bulk_buffer(handle, in->extents,
+            void* extents_buf = pull_margo_bulk(handle, in->extents,
                                                       bulk_sz, &local_bulk);
             if (NULL == extents_buf) {
                 LOGERR("failed to get bulk extents");
@@ -1191,10 +1191,10 @@ static void laminate_bcast_rpc(hg_handle_t handle)
                     if (ret == UNIFYFS_SUCCESS) {
                         req->req_type = rpc;
                         req->coll = coll;
-                        req->handle = handle;
-                        req->input = (void*) in;
-                        req->bulk_buf = extents_buf;
-                        req->bulk_sz = bulk_sz;
+                        req->req_state.handle = handle;
+                        req->req_state.inputs = (void*) in;
+                        req->req_state.bulk_buf = extents_buf;
+                        req->req_state.bulk_sz = bulk_sz;
                         ret = sm_submit_service_request(req);
                         if (ret != UNIFYFS_SUCCESS) {
                             LOGERR("failed to submit coll request to svcmgr");
@@ -1345,10 +1345,10 @@ static void transfer_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = NULL;
-                    req->bulk_sz = 0;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = NULL;
+                    req->req_state.bulk_sz = 0;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");
@@ -1418,10 +1418,10 @@ int unifyfs_invoke_broadcast_transfer(int client_app,
                 coll->client_req_id = transfer_id;
                 req->req_type = rpc;
                 req->coll = coll;
-                req->handle = HG_HANDLE_NULL;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = HG_HANDLE_NULL;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = sm_submit_service_request(req);
                 if (ret != UNIFYFS_SUCCESS) {
                     LOGERR("failed to submit coll request to svcmgr");
@@ -1471,10 +1471,10 @@ static void truncate_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = NULL;
-                    req->bulk_sz = 0;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = NULL;
+                    req->req_state.bulk_sz = 0;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");
@@ -1577,10 +1577,10 @@ static void fileattr_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = NULL;
-                    req->bulk_sz = 0;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = NULL;
+                    req->req_state.bulk_sz = 0;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");
@@ -1684,10 +1684,10 @@ static void unlink_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = NULL;
-                    req->bulk_sz = 0;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = NULL;
+                    req->req_state.bulk_sz = 0;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");
@@ -1790,10 +1790,10 @@ static void metaget_all_bcast_rpc(hg_handle_t handle)
                 if (ret == UNIFYFS_SUCCESS) {
                     req->req_type = rpc;
                     req->coll = coll;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = NULL;
-                    req->bulk_sz = 0;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = NULL;
+                    req->req_state.bulk_sz = 0;
                     ret = sm_submit_service_request(req);
                     if (ret != UNIFYFS_SUCCESS) {
                         LOGERR("failed to submit coll request to svcmgr");

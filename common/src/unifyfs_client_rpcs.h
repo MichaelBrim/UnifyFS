@@ -59,10 +59,7 @@ typedef enum {
 
 typedef struct {
     client_rpc_e req_type;
-    hg_handle_t handle;
-    void* input;
-    void* bulk_buf;
-    size_t bulk_sz;
+    rpc_state req_state;
 } client_rpc_req_t;
 
 /* unifyfs_attach_rpc (client => server)

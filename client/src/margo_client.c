@@ -953,7 +953,7 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
         ret = (int) out.ret;
         if (ret == (int) UNIFYFS_SUCCESS) {
             *extent_count = out.extent_count;
-            void* out_buffer = pull_margo_bulk_buffer(handle, out.bulk_data,
+            void* out_buffer = pull_margo_bulk(handle, out.bulk_data,
                                                   out.bulk_size, NULL);
             *extents = (unifyfs_client_index_t*) out_buffer;
         }

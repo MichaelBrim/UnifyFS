@@ -66,35 +66,6 @@ static const char* PROTOCOL_MARGO_OFI_TCP;
 static const char* PROTOCOL_MARGO_OFI_RMA;
 #endif
 
-/* Given a margo instance ID (mid), return its corresponding
- * address as a newly allocated string to be freed by caller.
- * Returns NULL on error. */
-static char* get_margo_addr_str(margo_instance_id mid)
-{
-    /* get margo address for given instance */
-    hg_addr_t addr_self;
-    hg_return_t hret = margo_addr_self(mid, &addr_self);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_addr_self() failed");
-        return NULL;
-    }
-
-    /* convert margo address to a string */
-    char self_string[128];
-    hg_size_t self_string_sz = sizeof(self_string);
-    hret = margo_addr_to_string(mid,
-        self_string, &self_string_sz, addr_self);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_addr_to_string() failed");
-        margo_addr_free(mid, addr_self);
-        return NULL;
-    }
-    margo_addr_free(mid, addr_self);
-
-    /* return address in newly allocated string */
-    char* addr = strdup(self_string);
-    return addr;
-}
 
 /* setup_remote_target - Initializes the server-server margo target */
 static margo_instance_id setup_remote_target(void)
@@ -131,9 +102,17 @@ static margo_instance_id setup_remote_target(void)
     }
 
     /* get our address for server-server rpcs */
-    char* self_string = get_margo_addr_str(mid);
+    char* self_string = NULL;
+    hg_addr_t addr_self;
+    hg_return_t hret = margo_addr_self(mid, &addr_self);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_addr_self() failed - %s",
+               HG_Error_to_string(hret));
+    } else {
+        self_string = get_margo_addr_str(mid, addr_self);
+    }
     if (NULL == self_string) {
-        LOGERR("invalid value to publish server-server margo rpc address");
+        LOGERR("failed to get margo address string");
         margo_finalize(mid);
         return MARGO_INSTANCE_NULL;
     }
@@ -276,9 +255,17 @@ static margo_instance_id setup_local_target(void)
     }
 
     /* figure out what address this server is listening on */
-    char* self_string = get_margo_addr_str(mid);
+    char* self_string = NULL;
+    hg_addr_t addr_self;
+    hg_return_t hret = margo_addr_self(mid, &addr_self);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_addr_self() failed - %s",
+               HG_Error_to_string(hret));
+    } else {
+        self_string = get_margo_addr_str(mid, addr_self);
+    }
     if (NULL == self_string) {
-        LOGERR("margo_addr_self() failed");
+        LOGERR("failed to get margo address string");
         margo_finalize(mid);
         return MARGO_INSTANCE_NULL;
     }

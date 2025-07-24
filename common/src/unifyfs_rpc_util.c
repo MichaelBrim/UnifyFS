@@ -125,13 +125,336 @@ void rpc_clean_local_server_addr(void)
     }
 }
 
+
+/* Given a margo instance ID (mid) and hg_addr, return its corresponding
+ * address as a newly allocated string to be freed by caller.
+ * Returns NULL on error. */
+char*
+get_margo_addr_str(margo_instance_id mid,
+                   hg_addr_t maddr)
+{
+    /* convert margo address to a string */
+    char addr_string[128];
+    hg_size_t addr_string_sz = sizeof(addr_string);
+    hg_return_t hret = margo_addr_to_string(mid, addr_string,
+                                            &addr_string_sz, maddr);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_addr_to_string() failed - %s",
+               HG_Error_to_string(hret));
+        return NULL;
+    }
+
+    /* return address in newly allocated string */
+    char* addr = strdup(addr_string);
+    return addr;
+}
+
+rpc_state*
+create_rpc_request(hg_id_t rpc_id,
+                   margo_instance_id mid,
+                   hg_addr_t maddr,
+                   void* input, size_t input_sz,
+                   void* output, size_t output_sz)
+{
+    rpc_state* new_rpc = (rpc_state*) calloc(1, sizeof(rpc_state));
+    if (NULL != new_rpc) {
+        /* create handle for given rpc id */
+        hg_handle_t handle = HG_HANDLE_NULL;
+        hg_return_t hret = margo_create(mid, maddr, rpc_id, &handle);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_create() failed - %s",
+                   HG_Error_to_string(hret));
+        } else {
+            LOGDBG("created state for request rpc(%p) with handle(%p)",
+                   new_rpc, handle);
+
+            new_rpc->initiator = 1;
+            new_rpc->handle = handle;
+            new_rpc->mid = mid;
+            new_rpc->rpc_id = rpc_id;
+
+            if (NULL != input) {
+                new_rpc->inputs = input;
+            } else if (0 != input_sz) { /* allocate it */
+                new_rpc->inputs = calloc(1, input_sz);
+                if (NULL != new_rpc->inputs)
+                    new_rpc->inputs_sz = input_sz;
+            }
+
+            if (NULL != output) {
+                new_rpc->outputs = output;
+            } else if (0 != output_sz) { /* allocate it */
+                new_rpc->outputs = calloc(1, output_sz);
+                if (NULL != new_rpc->outputs)
+                    new_rpc->outputs_sz = output_sz;
+            }
+
+            /* if (HG_BULK_NULL != bulk) {
+                new_rpc->bulk_buf = bulk;
+                new_rpc->bulk_sz = bulk_sz;
+            } */
+        }
+    }
+    return new_rpc;
+}
+
+rpc_state*
+create_rpc_response(hg_handle_t handle,
+                    void* input,
+                    void* output, size_t output_sz)
+{
+    rpc_state* new_rpc = (rpc_state*) calloc(1, sizeof(rpc_state));
+    if (NULL != new_rpc) {
+        LOGDBG("created state for response rpc(%p) with handle(%p)",
+               new_rpc, handle);
+        
+        new_rpc->initiator = 0;
+        new_rpc->handle = handle;
+
+        margo_instance_id mid = margo_hg_handle_get_instance(handle);
+        assert(mid != MARGO_INSTANCE_NULL);
+        new_rpc->mid = mid;
+
+        const struct hg_info* hgi = margo_get_info(handle);
+        assert(hgi);
+        new_rpc->rpc_id = hgi->id;
+
+        if (NULL != input) {
+            new_rpc->inputs = input;
+            new_rpc->have_input = 1;
+        } 
+
+        if (NULL != output) {
+            new_rpc->outputs = output;
+        } else if (0 != output_sz) { /* allocate it */
+            new_rpc->outputs = calloc(1, output_sz);
+            if (NULL != new_rpc->outputs)
+                new_rpc->outputs_sz = output_sz;
+        }
+    }
+    return new_rpc;
+}
+
+int cleanup_rpc_state(rpc_state* rpc)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    hg_return_t hret;
+
+    if (HG_HANDLE_NULL != rpc->handle) {
+
+        LOGDBG("cleaning state for rpc(%p) with handle(%p)",
+               rpc, rpc->handle);
+
+        if (NULL != rpc->inputs) {
+            if (!rpc->initiator && rpc->have_input) {
+                LOGDBG("calling margo_free_input() for rpc(%p)", rpc);
+                hret = margo_free_input(rpc->handle, rpc->inputs);
+                if (hret != HG_SUCCESS)
+                    LOGERR("margo_free_input() failed - %s",
+                           HG_Error_to_string(hret));
+            }
+            if (0 != rpc->inputs_sz) { /* free since we allocated it */
+                LOGDBG("freeing input args for rpc(%p)", rpc);
+                free(rpc->inputs);
+            }
+        }
+
+        if (NULL != rpc->outputs) {
+            if (rpc->initiator && rpc->have_output) {
+                LOGDBG("calling margo_free_output() for rpc(%p)", rpc);
+                hret = margo_free_output(rpc->handle, rpc->outputs);
+                if (hret != HG_SUCCESS)
+                    LOGERR("margo_free_output() failed - %s",
+                           HG_Error_to_string(hret));
+            }
+            if (0 != rpc->outputs_sz) { /* free since we allocated it */
+                LOGDBG("freeing output args for rpc(%p)", rpc);
+                free(rpc->outputs);
+            }
+        }
+
+        margo_destroy(rpc->handle);
+    }
+
+    free(rpc);
+    return ret;
+}
+
+int sync_rpc_request(rpc_state* rpc,
+                     int timeout_msec,
+                     int retry)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    int done = 0;
+    double timeout_ms = 1.0 * timeout_msec;
+    do {
+        hg_return_t hret = margo_forward_timed(rpc->handle, rpc->inputs,
+                                               timeout_ms);
+        if (hret == HG_TIMEOUT) { /* timed-out */
+            LOGINFO("margo_forward_timed(%p) timed-out",
+                    rpc->handle);
+            if (!retry) {
+                done = 1;
+                ret = ETIMEDOUT;
+            } else {
+                retry -= 1;
+            }
+        } else if (hret != HG_SUCCESS) { /* other forwarding error */
+            LOGERR("margo_forward_timed(%p) failed - %s",
+                   rpc->handle, HG_Error_to_string(hret));
+            ret = UNIFYFS_ERROR_MARGO;
+            done = 1;
+        } else { /* success */
+            LOGDBG("margo_forward_timed(%p) succeeded",
+                   rpc->handle);
+            if (NULL != rpc->outputs) {
+                hret = margo_get_output(rpc->handle, rpc->outputs);
+                if (hret != HG_SUCCESS) {
+                    LOGERR("margo_get_output(%p) failed - %s",
+                           rpc->handle, HG_Error_to_string(hret));
+                    ret = UNIFYFS_ERROR_MARGO;
+                } else {
+                    rpc->have_output = 1;
+                }
+            }
+            done = 1;
+        }
+    } while (!done);
+    return ret;
+}
+
+int sync_rpc_response(rpc_state* rpc,
+                      int retry)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    int done = 0;
+    do {
+        hg_return_t hret = margo_respond(rpc->handle, rpc->outputs);
+        if (hret != HG_SUCCESS) { /* response error */
+            LOGERR("margo_respond(%p) failed - %s",
+                   rpc->handle, HG_Error_to_string(hret));
+            if (!retry) {
+                ret = UNIFYFS_ERROR_MARGO;
+                done = 1;
+            } else {
+                retry -= 1;
+            }
+        } else { /* success */
+            done = 1;
+        }
+    } while (!done);
+    return ret;
+}
+
+int async_rpc_request(rpc_state* rpc,
+                      int timeout_msec)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    double timeout_ms = 1.0 * timeout_msec;
+    margo_request mreq;
+    hg_return_t hret = margo_iforward_timed(rpc->handle, rpc->inputs,
+                                            timeout_ms, &mreq);
+    if (hret != HG_SUCCESS) { /* other forwarding error */
+        LOGERR("margo_iforward_timed(%p) failed - %s",
+               rpc->handle, HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    } else { /* success */
+        LOGDBG("margo_iforward_timed(%p) successful -> margo_req(%p)",
+               rpc->handle, mreq);
+        rpc->mreq = mreq;
+    }
+    return ret;
+}
+
+int async_rpc_request_finish(rpc_state* rpc)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    hg_return_t hret = margo_wait(rpc->mreq);
+    if (hret != HG_SUCCESS) { /* other forwarding error */
+        LOGERR("margo_wait(%p) failed - %s",
+               rpc->mreq, HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    } else {
+        if (NULL != rpc->outputs) {
+            hret = margo_get_output(rpc->handle, rpc->outputs);
+            if (hret != HG_SUCCESS) {
+                LOGERR("margo_get_output(%p) failed - %s",
+                       rpc->handle, HG_Error_to_string(hret));
+                ret = UNIFYFS_ERROR_MARGO;
+            } else {
+                rpc->have_output = 1;
+            }
+        }
+    }
+    return ret;
+}
+
+int async_rpc_response(rpc_state* rpc,
+                       int retry)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    int done = 0;
+    do {
+        margo_request mreq;
+        hg_return_t hret = margo_irespond(rpc->handle, rpc->outputs, &mreq);
+        if (hret != HG_SUCCESS) { /* response error */
+            LOGERR("margo_irespond(%p) failed - %s",
+                   rpc->handle, HG_Error_to_string(hret));
+            if (!retry) {
+                ret = UNIFYFS_ERROR_MARGO;
+                done = 1;
+            } else {
+                retry -= 1;
+            }
+        } else { /* success */
+            rpc->mreq = mreq;
+            done = 1;
+        }
+    } while (!done);
+    return ret;
+}
+
+/* Wait on the margo_request for the async RCP */
+int async_rpc_response_finish(rpc_state* rpc)
+{
+    if (NULL == rpc)
+        return EINVAL;
+
+    int ret = 0;
+    hg_return_t hret = margo_wait(rpc->mreq);
+    if (hret != HG_SUCCESS) { /* other forwarding error */
+        LOGERR("margo_wait(%p) failed - %s",
+               rpc->mreq, HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    }
+    return ret;
+}
+
 /* Use passed bulk handle to pull data into a newly allocated buffer.
  * If local_bulk is not NULL, will set to local bulk handle on success.
  * Returns bulk buffer, or NULL on failure. */
-void* pull_margo_bulk_buffer(hg_handle_t rpc_hdl,
-                             hg_bulk_t bulk_remote,
-                             hg_size_t bulk_sz,
-                             hg_bulk_t* local_bulk)
+void* pull_margo_bulk(hg_handle_t rpc_hdl,
+                      hg_bulk_t bulk_remote,
+                      hg_size_t bulk_sz,
+                      hg_bulk_t* local_bulk)
 {
     if (0 == bulk_sz) {
         return NULL;
@@ -155,7 +478,8 @@ void* pull_margo_bulk_buffer(hg_handle_t rpc_hdl,
     hg_return_t hret = margo_bulk_create(mid, 1, &buffer, &bulk_sz,
                                          HG_BULK_READWRITE, &bulk_local);
     if (hret != HG_SUCCESS) {
-        LOGERR("margo_bulk_create() failed");
+        LOGERR("margo_bulk_create() failed - %s",
+               HG_Error_to_string(hret));
         free(buffer);
         return NULL;
     }
@@ -176,8 +500,8 @@ void* pull_margo_bulk_buffer(hg_handle_t rpc_hdl,
                                    bulk_remote, offset,
                                    bulk_local, offset, len);
         if (hret != HG_SUCCESS) {
-            LOGERR("margo_bulk_transfer(buf_offset=%zu, len=%zu) failed",
-                   (size_t)offset, (size_t)len);
+            LOGERR("margo_bulk_transfer(buf_offset=%zu, len=%zu) failed - %s",
+                   (size_t)offset, (size_t)len, HG_Error_to_string(hret));
             break;
         }
         remain -= len;
@@ -194,8 +518,8 @@ void* pull_margo_bulk_buffer(hg_handle_t rpc_hdl,
         }
         return buffer;
     } else {
-        LOGERR("failed bulk transfer - transferred %zu of %zu bytes",
-               (bulk_sz - remain), bulk_sz);
+        LOGERR("failed bulk transfer (transferred %zu of %zu bytes) - %s",
+               (bulk_sz - remain), bulk_sz, HG_Error_to_string(hret));
         free(buffer);
         return NULL;
     }

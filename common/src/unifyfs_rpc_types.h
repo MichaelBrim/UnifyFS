@@ -21,14 +21,36 @@
 
 #include "unifyfs_meta.h"
 
-/* rpc encode/decode for timespec structs */
+/* Common state necessary to track and cleanup Margo RPCs */
+typedef struct rpc_state {
+    margo_instance_id mid; // which instance (client|server) this RPC uses
+    hg_id_t rpc_id;        // registered RPC id
+    hg_handle_t handle;    // handle passed to RPC handler func
+    margo_request mreq;    // request id for non-blocking RPCs
+    
+    void* inputs;      // pointer to RPC input args struct
+    void* outputs;     // pointer to RPC output args struct
+    size_t inputs_sz;  // if non-zero, we are allocating space for input_args
+    size_t outputs_sz; // if non-zero, we are allocating space for output_args
+    
+    void* bulk_buf;
+    size_t bulk_sz;
+    
+    int initiator;     // set to 1 when this process initiated rpc
+    int have_input;    // set to 1 when margo_get_input() is successful
+    int have_output;   // set to 1 when margo_get_output() is successful
+} rpc_state;
+
+// ========== Mercury RPC serialization of custom structs ==========
+
+/* encode/decode struct timespec */
 typedef struct timespec sys_timespec_t;
 MERCURY_GEN_STRUCT_PROC(sys_timespec_t,
     ((uint64_t)(tv_sec))
     ((uint64_t)(tv_nsec))
 )
 
-/* rpc encode/decode for unifyfs_file_attr_t */
+/* encode/decode unifyfs_file_attr_t */
 MERCURY_GEN_STRUCT_PROC(unifyfs_file_attr_t,
     ((int32_t)(gfid))
     ((int32_t)(is_laminated))

@@ -84,10 +84,10 @@ static void create_mountpoint_dir(int app_id,
     }
 
     req->req_type = UNIFYFS_CLIENT_RPC_METASET;
-    req->handle   = HG_HANDLE_NULL;
-    req->input    = (void*) in;
-    req->bulk_buf = NULL;
-    req->bulk_sz  = 0;
+    req->req_state.handle   = HG_HANDLE_NULL;
+    req->req_state.inputs   = (void*) in;
+    req->req_state.bulk_buf = NULL;
+    req->req_state.bulk_sz  = 0;
 
     in->app_id    = app_id;
     in->client_id = client_id;
@@ -213,10 +213,10 @@ static void unifyfs_attach_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_ATTACH;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -318,10 +318,10 @@ static void unifyfs_metaget_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_METAGET;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -381,10 +381,10 @@ static void unifyfs_metaset_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_METASET;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -444,10 +444,10 @@ static void unifyfs_fsync_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_SYNC;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -506,10 +506,10 @@ static void unifyfs_filesize_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_FILESIZE;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -569,10 +569,10 @@ static void unifyfs_transfer_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_TRANSFER;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -631,10 +631,10 @@ static void unifyfs_truncate_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_TRUNCATE;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -693,10 +693,10 @@ static void unifyfs_unlink_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_UNLINK;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -756,10 +756,10 @@ static void unifyfs_laminate_rpc(hg_handle_t handle)
                     .client_id = in->client_id,
                 };
                 req->req_type = UNIFYFS_CLIENT_RPC_LAMINATE;
-                req->handle = handle;
-                req->input = (void*) in;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = (void*) in;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -814,7 +814,7 @@ static void unifyfs_mread_rpc(hg_handle_t handle)
         } else {
             /* allocate buffer to hold array of read requests */
             hg_size_t size = in->bulk_size;
-            void* buffer = pull_margo_bulk_buffer(handle, in->bulk_extents,
+            void* buffer = pull_margo_bulk(handle, in->bulk_extents,
                                                  size, NULL);
             if (NULL == buffer) {
                 ret = UNIFYFS_ERROR_MARGO;
@@ -828,10 +828,10 @@ static void unifyfs_mread_rpc(hg_handle_t handle)
                         .client_id = in->client_id
                     };
                     req->req_type = UNIFYFS_CLIENT_RPC_READ;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = buffer;
-                    req->bulk_sz = size;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = buffer;
+                    req->req_state.bulk_sz = size;
                     ret = rm_submit_client_rpc_request(&ctx, req);
                 }
                 if (ret != UNIFYFS_SUCCESS) {
@@ -895,10 +895,10 @@ static void unifyfs_get_gfids_rpc(hg_handle_t handle)
                 margo_free_input(handle, in);
 
                 req->req_type = UNIFYFS_CLIENT_RPC_GET_GFIDS;
-                req->handle = handle;
-                req->input = NULL;
-                req->bulk_buf = NULL;
-                req->bulk_sz = 0;
+                req->req_state.handle = handle;
+                req->req_state.inputs = NULL;
+                req->req_state.bulk_buf = NULL;
+                req->req_state.bulk_sz = 0;
                 ret = rm_submit_client_rpc_request(&ctx, req);
             }
 
@@ -949,7 +949,7 @@ static void unifyfs_node_local_extents_get_rpc(hg_handle_t handle)
         } else {
             /* allocate buffer to hold array of read requests */
             hg_size_t size = in->bulk_size;
-            void* buffer = pull_margo_bulk_buffer(handle, in->bulk_data,
+            void* buffer = pull_margo_bulk(handle, in->bulk_data,
                                                   size, NULL);
             if (NULL == buffer) {
                 ret = UNIFYFS_ERROR_MARGO;
@@ -963,10 +963,10 @@ static void unifyfs_node_local_extents_get_rpc(hg_handle_t handle)
                             .client_id = in->client_id,
                     };
                     req->req_type = UNIFYFS_CLIENT_RPC_NODE_LOCAL_EXTENTS_GET;
-                    req->handle = handle;
-                    req->input = (void*) in;
-                    req->bulk_buf = buffer;
-                    req->bulk_sz = size;
+                    req->req_state.handle = handle;
+                    req->req_state.inputs = (void*) in;
+                    req->req_state.bulk_buf = buffer;
+                    req->req_state.bulk_sz = size;
                     ret = rm_submit_client_rpc_request(&ctx, req);
                 }
                 if (ret != UNIFYFS_SUCCESS) {

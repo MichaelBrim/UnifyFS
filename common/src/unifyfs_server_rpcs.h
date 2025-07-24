@@ -58,11 +58,8 @@ typedef enum {
 /* structure to track server-to-server rpc request state */
 typedef struct {
     server_rpc_e req_type;
-    hg_handle_t handle;
+    rpc_state req_state;
     void* coll;
-    void* input;
-    void* bulk_buf;
-    size_t bulk_sz;
 } server_rpc_req_t;
 
 /*---- Server Point-to-Point (p2p) RPCs ----*/

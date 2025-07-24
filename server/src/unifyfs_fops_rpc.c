@@ -123,10 +123,10 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
         /* then ask svcmgr to process the pending extent sync(s) */
         *pending_gfid = gfid;
         svr_req->req_type = UNIFYFS_SERVER_PENDING_SYNC;
-        svr_req->handle   = HG_HANDLE_NULL;
-        svr_req->input    = (void*) pending_gfid;
-        svr_req->bulk_buf = NULL;
-        svr_req->bulk_sz  = 0;
+        svr_req->req_state.handle   = HG_HANDLE_NULL;
+        svr_req->req_state.inputs   = (void*) pending_gfid;
+        svr_req->req_state.bulk_buf = NULL;
+        svr_req->req_state.bulk_sz  = 0;
         ret = sm_submit_service_request(svr_req);
     }
 
