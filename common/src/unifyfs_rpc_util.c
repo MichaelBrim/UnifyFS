@@ -240,7 +240,7 @@ int cleanup_rpc_state(rpc_state* rpc)
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     hg_return_t hret;
 
     if (HG_HANDLE_NULL != rpc->handle) {
@@ -290,7 +290,7 @@ int sync_rpc_request(rpc_state* rpc,
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     int done = 0;
     double timeout_ms = 1.0 * timeout_msec;
     do {
@@ -335,7 +335,7 @@ int sync_rpc_response(rpc_state* rpc,
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     int done = 0;
     do {
         hg_return_t hret = margo_respond(rpc->handle, rpc->outputs);
@@ -361,7 +361,7 @@ int async_rpc_request(rpc_state* rpc,
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     double timeout_ms = 1.0 * timeout_msec;
     margo_request mreq;
     hg_return_t hret = margo_iforward_timed(rpc->handle, rpc->inputs,
@@ -383,7 +383,7 @@ int async_rpc_request_finish(rpc_state* rpc)
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     hg_return_t hret = margo_wait(rpc->mreq);
     if (hret != HG_SUCCESS) { /* other forwarding error */
         LOGERR("margo_wait(%p) failed - %s",
@@ -410,7 +410,7 @@ int async_rpc_response(rpc_state* rpc,
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     int done = 0;
     do {
         margo_request mreq;
@@ -438,7 +438,7 @@ int async_rpc_response_finish(rpc_state* rpc)
     if (NULL == rpc)
         return EINVAL;
 
-    int ret = 0;
+    int ret = UNIFYFS_SUCCESS;
     hg_return_t hret = margo_wait(rpc->mreq);
     if (hret != HG_SUCCESS) { /* other forwarding error */
         LOGERR("margo_wait(%p) failed - %s",

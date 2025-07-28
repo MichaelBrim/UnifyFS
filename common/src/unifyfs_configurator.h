@@ -88,6 +88,7 @@
     UNIFYFS_CFG(logio, spill_size, INT, UNIFYFS_LOGIO_SPILL_SIZE, "log-based I/O spillover file size", NULL) \
     UNIFYFS_CFG(logio, spill_dir, STRING, NULLSTRING, "spillover directory", configurator_directory_check) \
     UNIFYFS_CFG(margo, client_pool_size, INT, UNIFYFS_MARGO_POOL_SZ, "size of server's ULT pool for client-server RPCs", NULL) \
+    UNIFYFS_CFG(margo, client_retry, INT, UNIFYFS_MARGO_CLIENT_SERVER_RETRY_COUNT, "number of retries for client-server RPCs that time-out", NULL) \
     UNIFYFS_CFG(margo, client_timeout, INT, UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC, "timeout in milliseconds for client-server RPCs", NULL) \
     UNIFYFS_CFG(margo, lazy_connect, BOOL, on, "wait until first communication with server to resolve its connection address", NULL) \
     UNIFYFS_CFG(margo, server_pool_size, INT, UNIFYFS_MARGO_POOL_SZ, "size of server's ULT pool for server-server RPCs", NULL) \

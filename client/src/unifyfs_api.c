@@ -207,12 +207,20 @@ unifyfs_rc unifyfs_initialize(const char* mountpoint,
     }
 
     /* Timeout to wait on rpc calls to server, in milliseconds */
-    double timeout_msecs = UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC;
+    int timeout_msecs = UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC;
     cfgval = client_cfg->margo_client_timeout;
     if (cfgval != NULL) {
         rc = configurator_int_val(cfgval, &l);
         if (rc == 0) {
             timeout_msecs = (double)l;
+        }
+    }
+    int timeout_retry = UNIFYFS_MARGO_CLIENT_SERVER_RETRY_COUNT;
+    cfgval = client_cfg->margo_client_retry;
+    if (cfgval != NULL) {
+        rc = configurator_int_val(cfgval, &l);
+        if (rc == 0) {
+            timeout_retry = (int)l;
         }
     }
 
@@ -226,7 +234,7 @@ unifyfs_rc unifyfs_initialize(const char* mountpoint,
     }
 
     /* open rpc connection to server */
-    rc = unifyfs_client_rpc_init(timeout_msecs);
+    rc = unifyfs_client_rpc_init(timeout_msecs, timeout_retry);
     if (rc != UNIFYFS_SUCCESS) {
         LOGERR("failed to initialize client RPC");
         return rc;

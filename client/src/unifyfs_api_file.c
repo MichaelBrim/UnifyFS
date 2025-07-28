@@ -283,8 +283,6 @@ unifyfs_rc unifyfs_get_gfid_list(unifyfs_handle fshdl,
                                  unifyfs_gfid** gfid_list)
 {
     unifyfs_client* client = fshdl;
-    // TODO: internally, we seem to be using ints for gfids.  The fact that
-    // they're uint32_t at the API layer is worrying...
     return invoke_client_get_gfids_rpc(client, num_gfids, (int**)gfid_list);
 }
 

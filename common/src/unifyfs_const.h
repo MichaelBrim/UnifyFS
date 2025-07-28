@@ -61,8 +61,9 @@
 
 // Margo Default Values
 #define UNIFYFS_MARGO_POOL_SZ 4
-#define UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC  5000  /*  5.0 sec */
-#define UNIFYFS_MARGO_SERVER_SERVER_TIMEOUT_MSEC 15000  /* 15.0 sec */
+#define UNIFYFS_MARGO_CLIENT_SERVER_RETRY_COUNT 1
+#define UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC  5000  /*  5 sec */
+#define UNIFYFS_MARGO_SERVER_SERVER_TIMEOUT_MSEC 15000  /* 15 sec */
 
 // Metadata Default Values
 #define UNIFYFS_META_DEFAULT_SLICE_SZ MIB    /* data slice size for metadata */

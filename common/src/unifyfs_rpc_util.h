@@ -41,14 +41,14 @@ char* get_margo_addr_str(margo_instance_id mid,
                          hg_addr_t maddr);
 
 rpc_state* create_rpc_request(hg_id_t rpc_id,
-                                margo_instance_id mid,
-                                hg_addr_t maddr,
-                                void* input, size_t input_sz,
-                                void* output, size_t output_sz);
+                              margo_instance_id mid,
+                              hg_addr_t maddr,
+                              void* input, size_t input_sz,
+                              void* output, size_t output_sz);
 
 rpc_state* create_rpc_response(hg_handle_t handle,
-                                 void* input,
-                                 void* output, size_t output_sz);
+                               void* input,
+                               void* output, size_t output_sz);
 
 int cleanup_rpc_state(rpc_state* rpc);
 

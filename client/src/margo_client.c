@@ -82,7 +82,8 @@ static void register_client_rpcs(client_rpc_context_t* ctx)
 }
 
 /* initialize margo client-server rpc */
-int unifyfs_client_rpc_init(double timeout_msecs)
+int unifyfs_client_rpc_init(int timeout_msecs,
+                            int retry_count)
 {
     hg_return_t hret;
 
@@ -119,7 +120,8 @@ int unifyfs_client_rpc_init(double timeout_msecs)
     }
 
     /* timeout value to use on rpc operations */
-    ctx->timeout = timeout_msecs;
+    ctx->timeout_msec = timeout_msecs;
+    ctx->retry_count = retry_count;
 
     /* initialize margo */
     int use_progress_thread = 1;
@@ -209,7 +211,7 @@ int unifyfs_client_rpc_finalize(void)
 
 /*--- Invocation methods for client-to-server RPCs ---*/
 
-/* create and return a margo handle for given rpc id */
+#if 0 /* create and return a margo handle for given rpc id */
 static hg_handle_t create_handle(hg_id_t id)
 {
     /* define a temporary to refer to global context */
@@ -223,19 +225,47 @@ static hg_handle_t create_handle(hg_id_t id)
     }
     return handle;
 }
+#endif
 
-static int forward_to_server(hg_handle_t hdl,
-                             void* input_ptr,
-                             double timeout_msec)
+static int sync_call_server(rpc_state* rpc, const char* rpc_name)
 {
-    hg_return_t hret = margo_forward_timed(hdl, input_ptr, timeout_msec);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_forward_timed() failed - %s", HG_Error_to_string(hret));
-        //margo_state_dump(client_rpc_context->mid, "-", 0, NULL);
-        return UNIFYFS_ERROR_MARGO;
+    int ret = UNIFYFS_SUCCESS;
+    LOGDBG("calling the %s rpc(%p) synchronously", rpc_name, rpc);
+    int rc = sync_rpc_request(rpc, client_rpc_context->timeout_msec,
+                              client_rpc_context->retry_count);
+    if (rc != 0) {
+        LOGERR("%s sync rpc(%p) request failed (rc=%d)", rpc_name, rpc, rc);
+        ret = rc;
     }
-    return UNIFYFS_SUCCESS;
+    return ret;
 }
+
+#if 0 // TODO: determine if we need async client-server rpcs
+static int async_call_server(rpc_state* rpc, const char* rpc_name)
+{
+    int ret = UNIFYFS_SUCCESS;
+    LOGDBG("calling the %s rpc(%p) asynchronously", rpc_name, rpc);
+    int rc = async_rpc_request(rpc, client_rpc_context->timeout_msec);
+    if (rc != 0) {
+        LOGERR("%s async rpc(%p) request failed (rc=%d)", rpc_name, rpc, rc);
+        ret = rc;
+    }
+    return ret;
+}
+
+static int async_call_finish(rpc_state* rpc, const char* rpc_name)
+{
+    int ret = UNIFYFS_SUCCESS;
+    LOGDBG("finishing the async %s rpc(%p)", rpc_name, rpc);
+    int rc = async_rpc_request_finish(rpc);
+    if (rc != 0) {
+        LOGERR("%s async rpc(%p) request finish failed (rc=%d)",
+               rpc_name, rpc, rc);
+        ret = rc;
+    }
+    return ret;
+}
+#endif
 
 /* invokes the mount rpc function */
 int invoke_client_mount_rpc(unifyfs_client* client)
@@ -245,82 +275,52 @@ int invoke_client_mount_rpc(unifyfs_client* client)
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.mount_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_mount";
     unifyfs_mount_in_t in;
-    in.dbg_rank = client->state.app_rank;
-    in.mount_prefix = strdup(client->cfg.unifyfs_mountpoint);
-
-    /* pass our margo address to the server */
-    in.client_addr_str = strdup(client_rpc_context->client_addr_str);
-
-    /* call rpc function */
-    LOGDBG("invoking the mount rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of mount rpc to server failed");
-        margo_destroy(handle);
-        return rc;
+    unifyfs_mount_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.mount_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
     }
 
-    /* free memory on input struct */
-    free((void*)in.mount_prefix);
-    free((void*)in.client_addr_str);
-
-    /* decode response */
+    /* set input parameters */
+    in.dbg_rank = client->state.app_rank;
+    in.mount_prefix = strdup(client->cfg.unifyfs_mountpoint);
+    in.client_addr_str = strdup(client_rpc_context->client_addr_str);
+    
+    /* call rpc function */
     int ret;
-    unifyfs_mount_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int)UNIFYFS_SUCCESS) {
             /* get assigned client id, and verify app_id */
             client->state.client_id = (int) out.client_id;
-            int srvr_app_id   = (int) out.app_id;
+            int srvr_app_id = (int) out.app_id;
             if (client->state.app_id != srvr_app_id) {
                 LOGWARN("mismatch on app_id - using %d, server returned %d",
                         client->state.app_id, srvr_app_id);
             }
-            LOGDBG("My client id is %d", client->state.client_id);
+            LOGINFO("My [app:client] id is [%d:%d]",
+                    client->state.app_id, client->state.client_id);
         }
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
+
+    /* free allocated memory from input struct */
+    free((void*)in.mount_prefix);
+    free((void*)in.client_addr_str);
 
     return ret;
-}
-
-/* Fill attach rpc input struct with client-side context info */
-static void fill_client_attach_info(unifyfs_client* client,
-                                    unifyfs_attach_in_t* in)
-{
-    in->app_id            = client->state.app_id;
-    in->client_id         = client->state.client_id;
-    in->shmem_super_size  = client->state.shm_super_ctx->size;
-    in->meta_offset       = client->state.write_index.index_offset;
-    in->meta_size         = client->state.write_index.index_size;
-
-    if (NULL != client->state.logio_ctx->shmem) {
-        in->logio_mem_size = client->state.logio_ctx->shmem->size;
-    } else {
-        in->logio_mem_size = 0;
-    }
-
-    in->logio_spill_size = client->state.logio_ctx->spill_sz;
-    if (client->state.logio_ctx->spill_sz) {
-        in->logio_spill_dir = strdup(client->cfg.logio_spill_dir);
-    } else {
-        in->logio_spill_dir = NULL;
-    }
 }
 
 
@@ -332,38 +332,52 @@ int invoke_client_attach_rpc(unifyfs_client* client)
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.attach_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_attach";
     unifyfs_attach_in_t in;
-    fill_client_attach_info(client, &in);
+    unifyfs_attach_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.attach_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
+    in.app_id            = client->state.app_id;
+    in.client_id         = client->state.client_id;
+    in.shmem_super_size  = client->state.shm_super_ctx->size;
+    in.meta_offset       = client->state.write_index.index_offset;
+    in.meta_size         = client->state.write_index.index_size;
+
+    if (NULL != client->state.logio_ctx->shmem) {
+        in.logio_mem_size = client->state.logio_ctx->shmem->size;
+    } else {
+        in.logio_mem_size = 0;
+    }
+
+    in.logio_spill_size = client->state.logio_ctx->spill_sz;
+    if (client->state.logio_ctx->spill_sz) {
+        in.logio_spill_dir = strdup(client->cfg.logio_spill_dir);
+    } else {
+        in.logio_spill_dir = NULL;
+    }
 
     /* call rpc function */
-    LOGDBG("invoking the attach rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of attach rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_attach_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
+
+    /* free allocated memory from input struct */
     if (NULL != in.logio_spill_dir) {
         free((void*)in.logio_spill_dir);
     }
@@ -379,39 +393,34 @@ int invoke_client_unmount_rpc(unifyfs_client* client)
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.unmount_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_attach";
     unifyfs_unmount_in_t in;
+    unifyfs_unmount_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.unmount_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
 
     /* call rpc function */
-    LOGDBG("invoking the unmount rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of unmount rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_unmount_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -436,42 +445,38 @@ int invoke_client_metaset_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.metaset_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_metaset";
     unifyfs_metaset_in_t in;
+    unifyfs_metaset_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.metaset_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.attr_op   = (int32_t) attr_op;
     memcpy(&(in.attr), f_meta, sizeof(*f_meta));
 
+    LOGDBG("metaset - gfid:%d file:%s", in.attr.gfid, in.attr.filename);
+
     /* call rpc function */
-    LOGDBG("invoking the metaset rpc function in client - gfid:%d file:%s",
-           in.attr.gfid, in.attr.filename);
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of metaset rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_metaset_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -486,31 +491,31 @@ int invoke_client_metaget_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.metaget_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_metaget";
     unifyfs_metaget_in_t in;
+    unifyfs_metaget_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.metaget_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
 
-    /* call rpc function */
-    LOGDBG("invoking the metaget rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of metaget rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
+    LOGDBG("metaget - gfid:%d", gfid);
 
-    /* decode response */
+    /* call rpc function */
     int ret;
-    unifyfs_metaget_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int)UNIFYFS_SUCCESS) {
             /* fill in results  */
@@ -520,70 +525,64 @@ int invoke_client_metaget_rpc(unifyfs_client* client,
                 file_meta->filename = strdup(out.attr.filename);
             }
         }
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
 
 /* invokes the client filesize rpc function */
 int invoke_client_filesize_rpc(unifyfs_client* client,
-                              int gfid,
-                              size_t* outsize)
+                               int gfid,
+                               size_t* outsize)
 {
     /* check that we have initialized margo */
     if (NULL == client_rpc_context) {
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.filesize_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_filesize";
     unifyfs_filesize_in_t in;
+    unifyfs_filesize_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.filesize_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
 
-    /* call rpc function */
-    LOGDBG("invoking the filesize rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of filesize rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
+    LOGDBG("getting filesize - gfid:%d", gfid);
 
-    /* decode response */
+    /* call rpc function */
     int ret;
-    unifyfs_filesize_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int)UNIFYFS_SUCCESS) {
             *outsize = (size_t) out.filesize;
         }
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc); 
 
     return ret;
 }
 
-/* invokes the client truncate rpc function */
+/* invokes the client transfer rpc function */
 int invoke_client_transfer_rpc(unifyfs_client* client,
                                int transfer_id,
                                int gfid,
@@ -595,11 +594,20 @@ int invoke_client_transfer_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.transfer_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_transfer";
     unifyfs_transfer_in_t in;
+    unifyfs_transfer_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.transfer_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id      = (int32_t) client->state.app_id;
     in.client_id   = (int32_t) client->state.client_id;
     in.transfer_id = (int32_t) transfer_id;
@@ -607,31 +615,19 @@ int invoke_client_transfer_rpc(unifyfs_client* client,
     in.mode        = (int32_t) parallel_transfer;
     in.dst_file    = (hg_const_string_t) dest_file;
 
+    LOGDBG("transferring gfid:%d to %s", gfid, dest_file);
+
     /* call rpc function */
-    LOGDBG("invoking the transfer rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of transfer rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_transfer_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -646,41 +642,38 @@ int invoke_client_truncate_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.truncate_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_truncate";
     unifyfs_truncate_in_t in;
+    unifyfs_truncate_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.truncate_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
     in.filesize  = (hg_size_t) filesize;
 
+    LOGDBG("truncate - gfid:%d", gfid);
+
     /* call rpc function */
-    LOGDBG("invoking the truncate rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of truncate rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_truncate_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -694,40 +687,37 @@ int invoke_client_unlink_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.unlink_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_unlink";
     unifyfs_unlink_in_t in;
+    unifyfs_unlink_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.unlink_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
 
+    LOGDBG("unlink - gfid:%d", gfid);
+
     /* call rpc function */
-    LOGDBG("invoking the unlink rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of unlink rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_unlink_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -741,40 +731,37 @@ int invoke_client_laminate_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.laminate_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_laminate";
     unifyfs_laminate_in_t in;
+    unifyfs_laminate_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.laminate_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
 
+    LOGDBG("laminate - gfid:%d", gfid);
+
     /* call rpc function */
-    LOGDBG("invoking the laminate rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of laminate rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_laminate_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -788,40 +775,37 @@ int invoke_client_sync_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.fsync_id);
-
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_fsync";
     unifyfs_fsync_in_t in;
+    unifyfs_fsync_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.fsync_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
     in.app_id    = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
     in.gfid      = (int32_t) gfid;
 
+    LOGDBG("sync - gfid:%d", gfid);
+
     /* call rpc function */
-    LOGINFO("invoking the sync rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of sync rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_fsync_out_t out;
-    hg_return_t hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -838,19 +822,31 @@ int invoke_client_mread_rpc(unifyfs_client* client,
         return UNIFYFS_FAILURE;
     }
 
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.mread_id);
+    const char* rpc_name = "unifyfs_mread";
+    unifyfs_mread_in_t in;
+    unifyfs_mread_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.mread_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
 
     /* initialize bulk handle for extents */
-    unifyfs_mread_in_t in;
-    hg_return_t hret = margo_bulk_create(client_rpc_context->mid,
+    hg_return_t hret = margo_bulk_create(rpc->mid,
                                          1, &extents_buffer, &extents_size,
                                          HG_BULK_READ_ONLY, &in.bulk_extents);
     if (hret != HG_SUCCESS) {
+        LOGERR("failed to create bulk for %s rpc request - %s",
+               rpc_name, HG_Error_to_string(hret));
+        cleanup_rpc_state(rpc);
         return UNIFYFS_ERROR_MARGO;
     }
 
-    /* fill input struct */
+    /* set input parameters */
     in.mread_id   = (int32_t) reqid;
     in.app_id     = (int32_t) client->state.app_id;
     in.client_id  = (int32_t) client->state.client_id;
@@ -858,34 +854,17 @@ int invoke_client_mread_rpc(unifyfs_client* client,
     in.bulk_size  = (hg_size_t) extents_size;
 
     /* call rpc function */
-    LOGDBG("invoking the mread rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of mread rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_mread_out_t out;
-    hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
 
-    /* margo_forward serializes all data before returning, and it's safe to
-     * free the rpc params */
     margo_bulk_free(in.bulk_extents);
-
-    /* free resources */
-    margo_destroy(handle);
+    cleanup_rpc_state(rpc);
 
     return ret;
 }
@@ -917,16 +896,31 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
         ext->length = cur->value.length;
         cur = cur->next;
     }
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(
-            client_rpc_context->rpcs.node_local_extents_get_id);
 
-    /* fill in input struct */
+    const char* rpc_name = "unifyfs_node_local_extents_get";
     unifyfs_node_local_extents_get_in_t in;
-    hg_return_t hret = margo_bulk_create(client_rpc_context->mid,
+    unifyfs_node_local_extents_get_out_t out;
+    rpc_state* rpc =
+        create_rpc_request(client_rpc_context->rpcs.node_local_extents_get_id,
+                           client_rpc_context->mid,
+                           client_rpc_context->svr_addr,
+                           (void*)&in, 0,
+                           (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        free(buffer);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
+    hg_return_t hret = margo_bulk_create(rpc->mid,
                                          1, &buffer, &extents_size,
                                          HG_BULK_READ_ONLY, &in.bulk_data);
     if (hret != HG_SUCCESS) {
+        LOGERR("failed to create bulk for %s rpc request - %s",
+               rpc_name, HG_Error_to_string(hret));
+        cleanup_rpc_state(rpc);
+        free(buffer);
         return UNIFYFS_ERROR_MARGO;
     }
     in.app_id = (int32_t) client->state.app_id;
@@ -935,42 +929,79 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
     in.bulk_size = extents_size;
 
     /* call rpc function */
-    LOGDBG("invoking the node_local_extents_get rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    int rc = forward_to_server(handle, &in, timeout);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("forward of metaget rpc to server failed");
-        margo_destroy(handle);
-        return rc;
-    }
-
-    /* decode response */
     int ret;
-    unifyfs_node_local_extents_get_out_t out;
-    hret = margo_get_output(handle, &out);
-    if (hret == HG_SUCCESS) {
-        LOGDBG("Got response ret=%" PRIi32, out.ret);
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int) UNIFYFS_SUCCESS) {
             *extent_count = out.extent_count;
-            void* out_buffer = pull_margo_bulk(handle, out.bulk_data,
-                                                  out.bulk_size, NULL);
+            void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_data,
+                                               out.bulk_size, NULL);
             *extents = (unifyfs_client_index_t*) out_buffer;
         }
-        margo_free_output(handle, &out);
     } else {
-        LOGERR("margo_get_output() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
+        ret = rc;
     }
-    /* margo_forward serializes all data before
-     * returning, and it's safe to free the rpc params */
-    margo_bulk_free(in.bulk_data);
-    /* free resources */
 
-    margo_destroy(handle);
+    margo_bulk_free(in.bulk_data);
+    cleanup_rpc_state(rpc);
     free(buffer);
     return ret;
 }
+
+/* invokes the get_gfids rpc function */
+int invoke_client_get_gfids_rpc(unifyfs_client* client,
+                                int* num_gfids,
+                                int** gfid_list)
+{
+    /* check that we have initialized margo */
+    if (NULL == client_rpc_context) {
+        return UNIFYFS_FAILURE;
+    }
+
+    const char* rpc_name = "unifyfs_get_gfids";
+    unifyfs_get_gfids_in_t in;
+    unifyfs_get_gfids_out_t out;
+    rpc_state* rpc = create_rpc_request(client_rpc_context->rpcs.get_gfids_id,
+                                        client_rpc_context->mid,
+                                        client_rpc_context->svr_addr,
+                                        (void*)&in, 0,
+                                        (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* set input parameters */
+    in.app_id    = (int32_t) client->state.app_id;
+    in.client_id = (int32_t) client->state.client_id;
+
+    /* call rpc function */
+    int ret;
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
+        ret = (int) out.ret;
+        if (ret == (int) UNIFYFS_SUCCESS) {
+            LOGDBG("Number of GFIDs returned: %d", out.num_gfids);
+            *num_gfids = (int) out.num_gfids;
+            hg_size_t buf_size = (size_t) out.num_gfids * sizeof(int);
+            void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_gfids,
+                                               buf_size, NULL);
+            *gfid_list = (int*) out_buffer;
+        } else {
+            *num_gfids = 0;
+            *gfid_list = NULL;
+        }
+    } else {
+        ret = rc;
+    }
+
+    cleanup_rpc_state(rpc);
+    return ret;
+}
+
 
 /*--- Handler methods for server-to-client RPCs ---*/
 
@@ -1295,119 +1326,3 @@ static void unifyfs_unlink_callback_rpc(hg_handle_t handle)
     margo_destroy(handle);
 }
 DEFINE_MARGO_RPC_HANDLER(unifyfs_unlink_callback_rpc)
-
-/* invokes the get_gfids rpc function */
-int invoke_client_get_gfids_rpc(unifyfs_client* client,
-                                int* num_gfids,
-                                int** gfid_list)
-{
-    /* check that we have initialized margo */
-    if (NULL == client_rpc_context) {
-        return UNIFYFS_FAILURE;
-    }
-
-    // Anything we check in the cleanup block needs to be initialized to a
-    // rational value up here.  Also, there are a couple of margo calls for
-    // which the only way to know if we need to clean up is to save their
-    // return values.  That's why we have separate hg_return_t's for them.
-    hg_return_t get_output_hret = HG_OTHER_ERROR;
-    hg_return_t bulk_create_hret = HG_OTHER_ERROR;
-    int ret = UNIFYFS_ERROR_MARGO;
-     int* _gfid_list = NULL;
-
-    /* get handle to rpc function */
-    hg_handle_t handle = create_handle(client_rpc_context->rpcs.get_gfids_id);
-
-    /* fill in input struct */
-    unifyfs_get_gfids_in_t in;
-    in.app_id     = (int32_t) client->state.app_id;
-    in.client_id  = (int32_t) client->state.client_id;
-    /* TODO: What are app_id and client_id for?!? */
-
-    /* call rpc function */
-    LOGDBG("invoking the get_gfids rpc function in client");
-    double timeout = client_rpc_context->timeout;
-    ret = forward_to_server(handle, &in, timeout);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("forward of get_gfids rpc to server failed");
-        goto exit;
-    }
-
-    /* decode response */
-    unifyfs_get_gfids_out_t out;
-    get_output_hret = margo_get_output(handle, &out);
-    if (get_output_hret != HG_SUCCESS) {
-        LOGERR("margo_get_output() failed - %s",
-               HG_Error_to_string(get_output_hret));
-        ret = UNIFYFS_ERROR_MARGO;
-        goto exit;
-    }
-
-    LOGDBG("Got response ret=%" PRIi32, out.ret);
-    ret = (int) out.ret;
-    if (ret != (int)UNIFYFS_SUCCESS) {
-        goto exit;
-    }
-
-    LOGDBG("Number of GFIDs returned: %d", out.num_gfids);
-    *num_gfids = out.num_gfids;
-
-    // Pull the bulk data (the list of gfids) over from the server
-    hg_bulk_t local_bulk;
-    hg_size_t buf_size = out.num_gfids * sizeof(**gfid_list);
-
-    // Allocate local memory for the list of GFIDs
-    _gfid_list = calloc(out.num_gfids, sizeof(**gfid_list));
-
-    // Figure out some margo-specific info that we need for the transfer
-    const struct hg_info* info = margo_get_info(handle);
-    // TODO: Is this the correct handle??
-    hg_addr_t server_addr = info->addr;
-    // address of the bulk data on the server side
-    margo_instance_id mid = margo_hg_handle_get_instance(handle);
-    // TODO: Is this the correct handle??
-
-    bulk_create_hret = margo_bulk_create(mid, 1, (void**)&_gfid_list, &buf_size,
-                                         HG_BULK_WRITE_ONLY, &local_bulk);
-    if (bulk_create_hret != HG_SUCCESS) {
-        LOGERR("margo_bulk_create() failed - %s",
-               HG_Error_to_string(bulk_create_hret));
-        ret = UNIFYFS_ERROR_MARGO;
-        goto exit;
-    }
-
-    hg_return_t hret = margo_bulk_transfer(mid, HG_BULK_PULL, server_addr,
-                                           out.bulk_gfids, 0, local_bulk,
-                                           0, buf_size);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_bulk_transfer() failed - %s", HG_Error_to_string(hret));
-        ret = UNIFYFS_ERROR_MARGO;
-        goto exit;
-    }
-
-    // copy the pointer so it can be returned to the caller
-    // (Caller will need to eventually call free() on this pointer!)
-    *gfid_list = _gfid_list;
-
-exit:  // normally, we use "out", but that's also the name of a variable
-    /* free resources */
-    if (ret != UNIFYFS_SUCCESS) {
-        free(_gfid_list);
-    }
-
-    // If margo_bulk_create() succeeded, we need to free local_bulk
-    if (bulk_create_hret == HG_SUCCESS) {
-        hret = margo_bulk_free(local_bulk);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_bulk_free() failed - %s", HG_Error_to_string(hret));
-        }
-    }
-
-    // If margo_get_output() succeeded, we need to free out
-    if (get_output_hret == HG_SUCCESS) {
-        margo_free_output(handle, &out);
-    }
-
-    margo_destroy(handle);
-    return ret;
-}
