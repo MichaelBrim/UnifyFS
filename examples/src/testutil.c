@@ -17,7 +17,7 @@
 #include "testutil.h"
 
 /* Clone of the apsrintf().  See the standard asprintf() man page for details */
-static int asprintf(char** strp, const char* fmt, ...)
+int unifyfs_asprintf(char** strp, const char* fmt, ...)
 {
     /*
      * This code is taken from the vmalloc(3) man page and modified slightly.
@@ -213,7 +213,7 @@ char* mktemp_cmd(test_cfg* cfg, char* tmpdir)
         } while (i < 10);
         letters[10] = '\0';
 
-        asprintf(&tmpfile, "%s/tmp.%s", tmpdir, letters);
+        unifyfs_asprintf(&tmpfile, "%s/tmp.%s", tmpdir, letters);
         if (!tmpfile) {
             return NULL;
         }
@@ -314,7 +314,7 @@ int stat_cmd(test_cfg* cfg, char* filename)
     }
 
     /* Do some work to get the ':' in the right place */
-    asprintf(&tmp, "%s:", filename);
+    unifyfs_asprintf(&tmp, "%s:", filename);
     test_print(cfg, "%-26s%s", tmp, typestr);
     free(tmp);
 
