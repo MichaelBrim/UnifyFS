@@ -59,8 +59,14 @@ typedef enum {
 
 typedef struct {
     client_rpc_e req_type;
-    rpc_state req_state;
+    rpc_state* req_state;
 } client_rpc_req_t;
+
+client_rpc_req_t* allocate_client_rpc_state(client_rpc_e rpc_type,
+                                            hg_handle_t handle,
+                                            size_t input_sz,
+                                            size_t output_sz);
+void release_client_rpc_state(client_rpc_req_t* creq);
 
 /* unifyfs_attach_rpc (client => server)
  *
@@ -231,6 +237,22 @@ MERCURY_GEN_PROC(unifyfs_laminate_out_t,
                  ((int32_t)(ret)))
 DECLARE_MARGO_RPC_HANDLER(unifyfs_laminate_rpc)
 
+/* unifyfs_read_rpc (client => server)
+ *
+ * read the target unifyfs_extent_t into the bulk corresponding to user
+ * buffer */
+
+MERCURY_GEN_PROC(unifyfs_read_extent_in_t,
+                 ((int32_t)(app_id))
+                 ((int32_t)(client_id))
+                 ((unifyfs_extent_t)(extent))
+                 ((hg_bulk_t)(bulk_extent)))
+MERCURY_GEN_PROC(unifyfs_read_extent_out_t,
+                 ((int32_t)(ret))
+                 ((hg_size_t)(bytes_read)))
+DECLARE_MARGO_RPC_HANDLER(unifyfs_read_extent_rpc)
+
+
 /* unifyfs_mread_rpc (client => server)
  *
  * given mread (mread_id, app_id, client_id) and count of read requests,
@@ -294,20 +316,12 @@ DECLARE_MARGO_RPC_HANDLER(unifyfs_heartbeat_rpc)
  *
  * returns node local extents for a file
  * given a global file id */
-MERCURY_GEN_STRUCT_PROC(unifyfs_client_index_t,
-                 ((uint64_t)(file_pos))
-                 ((uint64_t)(log_pos))
-                 ((uint64_t)(length))
-                 ((int32_t)(gfid))
-                 ((int32_t)(log_app_id))
-                 ((int32_t)(log_client_id)))
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_in_t,
                  ((int32_t)(app_id))
                  ((int32_t)(client_id))
                  ((hg_size_t)(num_req))
                  ((hg_bulk_t)(bulk_data))
                  ((hg_size_t)(bulk_size)))
-
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_out_t,
                  ((int32_t)(ret))
                  ((hg_size_t)(extent_count))

@@ -795,10 +795,11 @@ static int complete_local_transfers(void)
     return ret;
 }
 
+#if 0 // MJB TESTING
 static int process_chunk_read_rpc(server_rpc_req_t* req)
 {
     int ret;
-    chunk_read_request_in_t* in = req->req_state.inputs;
+    chunk_read_request_in_t* in = req->req_state->inputs;
 
     /* issue chunk read requests */
     int src_rank    = (int)in->src_rank;
@@ -810,26 +811,26 @@ static int process_chunk_read_rpc(server_rpc_req_t* req)
 
     LOGDBG("handling chunk read requests from server[%d]: "
            "req=%d num_chunks=%d data_sz=%zu bulk_sz=%zu",
-           src_rank, req_id, num_chks, total_sz, req->req_state.bulk_sz);
+           src_rank, req_id, num_chks, total_sz, req->req_state->bulk_sz);
 
     ret = sm_issue_chunk_reads(src_rank, app_id, client_id,
                                req_id, num_chks, total_sz,
-                               (char*)req->req_state.bulk_buf);
+                               (char*)req->req_state->bulk_buf);
 
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
-    free(req->req_state.bulk_buf);
+    free(req->req_state->bulk_buf);
 
     /* send rpc response */
     chunk_read_request_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -837,11 +838,11 @@ static int process_chunk_read_rpc(server_rpc_req_t* req)
 static int process_add_extents_rpc(server_rpc_req_t* req)
 {
     /* get input parameters */
-    add_extents_in_t* in = req->req_state.inputs;
+    add_extents_in_t* in = req->req_state->inputs;
     int sender = (int) in->src_rank;
     int gfid = (int) in->gfid;
     size_t num_extents = (size_t) in->num_extents;
-    extent_metadata* extents = req->req_state.bulk_buf;
+    extent_metadata* extents = req->req_state->bulk_buf;
 
     /* add extents */
     LOGDBG("adding %zu extents to gfid=%d from server[%d]",
@@ -851,20 +852,20 @@ static int process_add_extents_rpc(server_rpc_req_t* req)
         LOGERR("failed to add extents from %d (ret=%d)", sender, ret);
     }
 
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
-    free(req->req_state.bulk_buf);
+    free(req->req_state->bulk_buf);
 
     /* send rpc response */
     add_extents_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -872,11 +873,11 @@ static int process_add_extents_rpc(server_rpc_req_t* req)
 static int process_find_extents_rpc(server_rpc_req_t* req)
 {
     /* get input parameters */
-    find_extents_in_t* in = req->req_state.inputs;
+    find_extents_in_t* in = req->req_state->inputs;
     int sender = (int) in->src_rank;
     int gfid = (int) in->gfid;
     size_t num_extents = (size_t) in->num_extents;
-    unifyfs_extent_t* extents = req->req_state.bulk_buf;
+    unifyfs_extent_t* extents = req->req_state->bulk_buf;
 
     LOGDBG("received %zu extent lookups for gfid=%d from server[%d]",
            num_extents, gfid, sender);
@@ -888,15 +889,15 @@ static int process_find_extents_rpc(server_rpc_req_t* req)
     int ret = sm_find_extents(gfid, num_extents, extents,
                               &num_chunks, &chunk_locs, &full_coverage);
 
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
-    free(req->req_state.bulk_buf);
+    free(req->req_state->bulk_buf);
 
     /* define a bulk handle to transfer chunk address info */
     hg_bulk_t bulk_resp_handle = HG_BULK_NULL;
     if (ret == UNIFYFS_SUCCESS) {
         if (num_chunks > 0) {
-            margo_instance_id mid = margo_hg_handle_get_instance(req->req_state.handle);
+            margo_instance_id mid = margo_hg_handle_get_instance(req->req_state->handle);
             assert(mid != MARGO_INSTANCE_NULL);
 
             void* buf = (void*) chunk_locs;
@@ -917,7 +918,7 @@ static int process_find_extents_rpc(server_rpc_req_t* req)
     out.num_locations = (int32_t) num_chunks;
     out.locations     = bulk_resp_handle;
 
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
@@ -927,7 +928,7 @@ static int process_find_extents_rpc(server_rpc_req_t* req)
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -935,9 +936,9 @@ static int process_find_extents_rpc(server_rpc_req_t* req)
 static int process_filesize_rpc(server_rpc_req_t* req)
 {
     /* get target file */
-    filesize_in_t* in = req->req_state.inputs;
+    filesize_in_t* in = req->req_state->inputs;
     int gfid = (int) in->gfid;
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* get size of target file */
@@ -948,13 +949,13 @@ static int process_filesize_rpc(server_rpc_req_t* req)
     filesize_out_t out;
     out.ret = (int32_t) ret;
     out.filesize = (hg_size_t) filesize;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -962,9 +963,9 @@ static int process_filesize_rpc(server_rpc_req_t* req)
 static int process_laminate_rpc(server_rpc_req_t* req)
 {
     /* get target file */
-    laminate_in_t* in = req->req_state.inputs;
+    laminate_in_t* in = req->req_state->inputs;
     int gfid  = (int)in->gfid;
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* do file lamination */
@@ -973,13 +974,13 @@ static int process_laminate_rpc(server_rpc_req_t* req)
     /* send rpc response */
     laminate_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -987,9 +988,9 @@ static int process_laminate_rpc(server_rpc_req_t* req)
 static int process_metaget_rpc(server_rpc_req_t* req)
 {
     /* get target file */
-    metaget_in_t* in = req->req_state.inputs;
+    metaget_in_t* in = req->req_state->inputs;
     int gfid  = (int) in->gfid;
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* initialize invalid attributes */
@@ -1003,13 +1004,13 @@ static int process_metaget_rpc(server_rpc_req_t* req)
     metaget_out_t out;
     out.ret = (int32_t) ret;
     out.attr = attrs;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
     return UNIFYFS_ERROR_NYI;
@@ -1018,26 +1019,26 @@ static int process_metaget_rpc(server_rpc_req_t* req)
 static int process_metaset_rpc(server_rpc_req_t* req)
 {
     /* update target file metadata */
-    metaset_in_t* in = req->req_state.inputs;
+    metaset_in_t* in = req->req_state->inputs;
     int gfid = (int) in->gfid;
     int attr_op = (int) in->fileop;
     unifyfs_file_attr_t* attrs = &(in->attr);
 
     int ret = sm_set_fileattr(gfid, attr_op, attrs);
 
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* send rpc response */
     metaset_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -1045,7 +1046,7 @@ static int process_metaset_rpc(server_rpc_req_t* req)
 static int process_transfer_rpc(server_rpc_req_t* req)
 {
     /* get target file and requested file size */
-    transfer_in_t* in = req->req_state.inputs;
+    transfer_in_t* in = req->req_state->inputs;
     int src_rank      = (int) in->src_rank;
     int client_app    = (int) in->client_app;
     int client_id     = (int) in->client_id;
@@ -1053,7 +1054,7 @@ static int process_transfer_rpc(server_rpc_req_t* req)
     int gfid          = (int) in->gfid;
     int transfer_mode = (int) in->mode;
     char* dest_file = strdup(in->dst_file);
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* do file transfer */
@@ -1064,13 +1065,13 @@ static int process_transfer_rpc(server_rpc_req_t* req)
     /* send rpc response */
     transfer_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
@@ -1078,10 +1079,10 @@ static int process_transfer_rpc(server_rpc_req_t* req)
 static int process_truncate_rpc(server_rpc_req_t* req)
 {
     /* get target file and requested file size */
-    truncate_in_t* in = req->req_state.inputs;
+    truncate_in_t* in = req->req_state->inputs;
     int gfid = (int) in->gfid;
     size_t fsize = (size_t) in->filesize;
-    margo_free_input(req->req_state.handle, in);
+    margo_free_input(req->req_state->handle, in);
     free(in);
 
     /* do file truncation */
@@ -1090,16 +1091,18 @@ static int process_truncate_rpc(server_rpc_req_t* req)
     /* send rpc response */
     truncate_out_t out;
     out.ret = (int32_t) ret;
-    hg_return_t hret = margo_respond(req->req_state.handle, &out);
+    hg_return_t hret = margo_respond(req->req_state->handle, &out);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_respond() failed");
     }
 
     /* cleanup req */
-    margo_destroy(req->req_state.handle);
+    margo_destroy(req->req_state->handle);
 
     return ret;
 }
+
+#endif // MJB TESTING
 
 static int process_bootstrap_bcast_rpc(server_rpc_req_t* req)
 {
@@ -1119,10 +1122,11 @@ static int process_bootstrap_bcast_rpc(server_rpc_req_t* req)
 static int process_extents_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and extents */
-    extent_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    extent_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
     size_t num_extents = (size_t) in->num_extents;
-    extent_metadata* extents = req->req_state.bulk_buf;
+    extent_metadata* extents = coll->bulk_buf;
 
     LOGDBG("gfid=%d num_extents=%zu", gfid, num_extents);
 
@@ -1142,7 +1146,8 @@ static int process_extents_bcast_rpc(server_rpc_req_t* req)
 static int process_fileattr_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and attributes */
-    fileattr_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    fileattr_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
     int attr_op = (int) in->attrop;
     unifyfs_file_attr_t* attrs = &(in->attr);
@@ -1171,11 +1176,12 @@ static int process_fileattr_bcast_rpc(server_rpc_req_t* req)
 static int process_laminate_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and extents */
-    laminate_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    laminate_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
     size_t num_extents = (size_t) in->num_extents;
     unifyfs_file_attr_t* fattr = &(in->attr);
-    extent_metadata* extents = req->req_state.bulk_buf;
+    extent_metadata* extents = coll->bulk_buf;
 
     LOGDBG("gfid=%d num_extents=%zu", gfid, num_extents);
 
@@ -1221,7 +1227,8 @@ static int process_laminate_bcast_rpc(server_rpc_req_t* req)
 static int process_transfer_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and requested file size */
-    transfer_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    transfer_bcast_in_t* in = coll->input;
     int src_rank      = (int) in->root;
     int gfid          = (int) in->gfid;
     int transfer_mode = (int) in->mode;
@@ -1251,7 +1258,8 @@ static int process_transfer_bcast_rpc(server_rpc_req_t* req)
 static int process_truncate_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and requested file size */
-    truncate_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    truncate_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
     size_t fsize = (size_t) in->filesize;
 
@@ -1281,7 +1289,8 @@ static int process_truncate_bcast_rpc(server_rpc_req_t* req)
 static int process_unlink_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and requested file size */
-    unlink_bcast_in_t* in = req->req_state.inputs;
+    coll_request* coll = (coll_request*) req->coll;
+    unlink_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
 
     LOGDBG("gfid=%d", gfid);
@@ -1423,7 +1432,7 @@ static int process_pending_sync(server_rpc_req_t* req)
     int ret = UNIFYFS_SUCCESS;
 
     /* get target file */
-    int* pending_gfid = req->req_state.inputs;
+    int* pending_gfid = req->req_state->inputs;
     int gfid = *pending_gfid;
     free(pending_gfid);
 
@@ -1493,13 +1502,13 @@ static int process_pending_sync(server_rpc_req_t* req)
                 /* send rpc response to requesting client */
                 unifyfs_fsync_out_t out;
                 out.ret = (int32_t) ret;
-                hg_return_t hret = margo_respond(creq->req_state.handle, &out);
+                hg_return_t hret = margo_respond(creq->req_state->handle, &out);
                 if (hret != HG_SUCCESS) {
                     LOGERR("margo_respond() failed");
                 }
 
                 /* cleanup req */
-                margo_destroy(creq->req_state.handle);
+                margo_destroy(creq->req_state->handle);
                 free(creq);
             }
         }
@@ -1548,6 +1557,7 @@ static int process_service_requests(void)
         server_rpc_req_t* req = (server_rpc_req_t*)
             arraylist_get(svc_reqs, i);
         switch (req->req_type) {
+#if 0 // MJB TESTING
         case UNIFYFS_SERVER_RPC_CHUNK_READ:
             rret = process_chunk_read_rpc(req);
             break;
@@ -1575,6 +1585,7 @@ static int process_service_requests(void)
         case UNIFYFS_SERVER_RPC_TRUNCATE:
             rret = process_truncate_rpc(req);
             break;
+#endif // MJB TESTING
         case UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP:
             rret = process_bootstrap_bcast_rpc(req);
             break;

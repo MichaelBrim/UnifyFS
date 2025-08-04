@@ -81,7 +81,6 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
     /* get number of file extent index values client has for us,
      * stored as a size_t value in index region of shared memory */
     size_t num_extents = *(client->state.write_index.ptr_num_entries);
-
     if (num_extents == 0) {
         return UNIFYFS_SUCCESS;  /* Nothing to do */
     }
@@ -91,13 +90,16 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
     /* the sync rpc now contains extents from a single file/gfid */
     assert(gfid == index_entry[0].gfid);
 
-    server_rpc_req_t* svr_req = malloc(sizeof(*svr_req));
-    int* pending_gfid = malloc(sizeof(int));
+    server_rpc_req_t* svr_req =
+        allocate_server_rpc_state(UNIFYFS_SERVER_PENDING_SYNC,
+                                  HG_HANDLE_NULL,
+                                  sizeof(int), 0);
     extent_metadata* extents = calloc(num_extents, sizeof(*extents));
-    if ((NULL == svr_req) || (NULL == pending_gfid) || (NULL == extents)) {
+    if ((NULL == svr_req) || (NULL == extents)) {
         LOGERR("failed to allocate memory for local extents sync");
         return ENOMEM;
     }
+    int* pending_gfid = (int*) svr_req->req_state->inputs;
 
     for (i = 0; i < num_extents; i++) {
         unifyfs_index_t* meta = index_entry + i;
@@ -116,17 +118,11 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
     if (ret) {
         LOGERR("failed to add pending local extents (gfid=%d, ret=%d)",
                gfid, ret);
-        free(pending_gfid);
-        free(svr_req);
+        release_server_rpc_state(svr_req);
         return ret;
     } else {
         /* then ask svcmgr to process the pending extent sync(s) */
         *pending_gfid = gfid;
-        svr_req->req_type = UNIFYFS_SERVER_PENDING_SYNC;
-        svr_req->req_state.handle   = HG_HANDLE_NULL;
-        svr_req->req_state.inputs   = (void*) pending_gfid;
-        svr_req->req_state.bulk_buf = NULL;
-        svr_req->req_state.bulk_sz  = 0;
         ret = sm_submit_service_request(svr_req);
     }
 

@@ -55,7 +55,7 @@ static int forward_child_request(void* input_ptr,
     int ret = UNIFYFS_SUCCESS;
 
     /* call rpc function */
-    double timeout_ms = margo_server_server_timeout_msec;
+    double timeout_ms = margo_service_timeout_msec;
     hg_return_t hret = margo_iforward_timed(chdl, input_ptr, timeout_ms, creq);
     if (hret != HG_SUCCESS) {
         LOGERR("failed to forward request(%p) - %s", creq,
@@ -494,13 +494,13 @@ static coll_request* collective_create(server_rpc_e req_type,
         coll_req->app_id        = -1;
         coll_req->client_id     = -1;
         coll_req->client_req_id = -1;
-        coll_req->auto_cleanup  =  1;
+        
         /* Default behavior is for bcast_progress_rpc() to automatically
          * call collective_cleanup() on the instance.  In cases where such
          * behavior is incorrect - such as when results need to be returned
-         * from the collective's children - this variable can be changed
+         * from the collective's children - auto_cleanup can be changed
          * before calling bcast_progress_rpc(). */
-
+        coll_req->auto_cleanup  =  1;
 
         int rc = ABT_mutex_create(&coll_req->resp_valid_sync);
         if (ABT_SUCCESS != rc) {
@@ -876,37 +876,35 @@ static void bootstrap_complete_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    bootstrap_complete_bcast_in_t* in = calloc(1, sizeof(*in));
-    bootstrap_complete_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.bootstrap_complete_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(bootstrap_complete_bcast_in_t),
+                                  sizeof(bootstrap_complete_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        bootstrap_complete_bcast_in_t*  in  = sreq->req_state->inputs;
+        bootstrap_complete_bcast_out_t* out = sreq->req_state->outputs;
+        
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            hg_id_t op_hgid =
-                unifyfsd_rpc_context->rpcs.bootstrap_complete_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs,
+               so mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -915,7 +913,7 @@ static void bootstrap_complete_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         bootstrap_complete_bcast_out_t bbo;
-        bbo.ret = (int32_t)ret;
+        bbo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &bbo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -923,8 +921,9 @@ static void bootstrap_complete_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1004,50 +1003,48 @@ static void extent_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    extent_bcast_in_t* in = calloc(1, sizeof(*in));
-    extent_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.extent_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(extent_bcast_in_t),
+                                  sizeof(extent_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
+        extent_bcast_in_t*  in  = sreq->req_state->inputs;
+        extent_bcast_out_t* out = sreq->req_state->outputs;
+
+        size_t num_extents = (size_t) in->num_extents;
+        size_t bulk_sz = num_extents * sizeof(struct extent_metadata);
+        hg_bulk_t local_bulk = HG_BULK_NULL;
+        void* extents_buf = pull_margo_bulk(handle, in->extents,
+                                            bulk_sz, &local_bulk);
+        if (NULL == extents_buf) {
+            LOGERR("failed to get bulk extents");
             ret = UNIFYFS_ERROR_MARGO;
         } else {
-            size_t num_extents = (size_t) in->num_extents;
-            size_t bulk_sz = num_extents * sizeof(struct extent_metadata);
-            hg_bulk_t local_bulk = HG_BULK_NULL;
-            void* extents_buf = pull_margo_bulk(handle, in->extents,
-                                                       bulk_sz, &local_bulk);
-            if (NULL == extents_buf) {
-                LOGERR("failed to get bulk extents");
-                ret = UNIFYFS_ERROR_MARGO;
+            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                     (void*)in, (void*)out, sizeof(*out),
+                                     in->extents, local_bulk, extents_buf);
+            if (NULL == coll) {
+                ret = ENOMEM;
             } else {
-                hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.extent_bcast_id;
-                server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS;
-                coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                        (void*)in, (void*)out, sizeof(*out),
-                                        in->extents, local_bulk, extents_buf);
-                if (NULL == coll) {
-                    ret = ENOMEM;
-                } else {
-                    /* update input structure that we are forwarding to point
-                     * to our local bulk buffer. will be restore on cleanup. */
-                    in->extents = local_bulk;
-                    ret = collective_forward(coll);
-                    if (ret == UNIFYFS_SUCCESS) {
-                        req->req_type = rpc;
-                        req->coll = coll;
-                        req->req_state.handle = handle;
-                        req->req_state.inputs = (void*) in;
-                        req->req_state.bulk_buf = extents_buf;
-                        req->req_state.bulk_sz = bulk_sz;
-                        ret = sm_submit_service_request(req);
-                        if (ret != UNIFYFS_SUCCESS) {
-                            LOGERR("failed to submit coll request to svcmgr");
-                        }
+                /* collective takes ownership of handle and inputs/outputs, so
+                   mark them as NULL in server req to avoid double cleanup */
+                sreq->coll = coll;
+                sreq->req_state->handle = HG_HANDLE_NULL;
+                sreq->req_state->inputs = NULL;
+                sreq->req_state->outputs = NULL;
+
+                /* update input structure that we are forwarding to point
+                 * to our local bulk buffer. will restore on cleanup. */
+                in->extents = local_bulk;
+                ret = collective_forward(coll);
+                if (ret == UNIFYFS_SUCCESS) {
+                    ret = sm_submit_service_request(sreq);
+                    if (ret != UNIFYFS_SUCCESS) {
+                        LOGERR("failed to submit coll request to svcmgr");
                     }
                 }
             }
@@ -1057,7 +1054,7 @@ static void extent_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         extent_bcast_out_t ebo;
-        ebo.ret = (int32_t)ret;
+        ebo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &ebo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1065,8 +1062,9 @@ static void extent_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        } 
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1155,50 +1153,48 @@ static void laminate_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    laminate_bcast_in_t* in = calloc(1, sizeof(*in));
-    laminate_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.laminate_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_LAMINATE;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(laminate_bcast_in_t),
+                                  sizeof(laminate_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
+        laminate_bcast_in_t*  in  = sreq->req_state->inputs;
+        laminate_bcast_out_t* out = sreq->req_state->outputs;
+
+        size_t n_extents = (size_t) in->num_extents;
+        size_t bulk_sz = n_extents * sizeof(struct extent_metadata);
+        hg_bulk_t local_bulk = HG_BULK_NULL;
+        void* extents_buf = pull_margo_bulk(handle, in->extents,
+                                            bulk_sz, &local_bulk);
+        if (NULL == extents_buf) {
+            LOGERR("failed to get bulk extents");
             ret = UNIFYFS_ERROR_MARGO;
         } else {
-            size_t n_extents = (size_t) in->num_extents;
-            size_t bulk_sz = n_extents * sizeof(struct extent_metadata);
-            hg_bulk_t local_bulk = HG_BULK_NULL;
-            void* extents_buf = pull_margo_bulk(handle, in->extents,
-                                                      bulk_sz, &local_bulk);
-            if (NULL == extents_buf) {
-                LOGERR("failed to get bulk extents");
-                ret = UNIFYFS_ERROR_MARGO;
+            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                     (void*)in, (void*)out, sizeof(*out),
+                                     in->extents, local_bulk, extents_buf);
+            if (NULL == coll) {
+                ret = ENOMEM;
             } else {
-                hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.laminate_bcast_id;
-                server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_LAMINATE;
-                coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                        (void*)in, (void*)out, sizeof(*out),
-                                        in->extents, local_bulk, extents_buf);
-                if (NULL == coll) {
-                    ret = ENOMEM;
-                } else {
-                    /* update input structure that we are forwarding to point
-                     * to our local bulk buffer. will be restore on cleanup. */
-                    in->extents = local_bulk;
-                    ret = collective_forward(coll);
-                    if (ret == UNIFYFS_SUCCESS) {
-                        req->req_type = rpc;
-                        req->coll = coll;
-                        req->req_state.handle = handle;
-                        req->req_state.inputs = (void*) in;
-                        req->req_state.bulk_buf = extents_buf;
-                        req->req_state.bulk_sz = bulk_sz;
-                        ret = sm_submit_service_request(req);
-                        if (ret != UNIFYFS_SUCCESS) {
-                            LOGERR("failed to submit coll request to svcmgr");
-                        }
+                /* collective takes ownership of handle and inputs/outputs, so
+                   mark them as NULL in server req to avoid double cleanup */
+                sreq->coll = coll;
+                sreq->req_state->handle = HG_HANDLE_NULL;
+                sreq->req_state->inputs = NULL;
+                sreq->req_state->outputs = NULL;
+
+                /* update input structure that we are forwarding to point
+                 * to our local bulk buffer. will be restore on cleanup. */
+                in->extents = local_bulk;
+                ret = collective_forward(coll);
+                if (ret == UNIFYFS_SUCCESS) {
+                    ret = sm_submit_service_request(sreq);
+                    if (ret != UNIFYFS_SUCCESS) {
+                        LOGERR("failed to submit coll request to svcmgr");
                     }
                 }
             }
@@ -1208,7 +1204,7 @@ static void laminate_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         laminate_bcast_out_t lbo;
-        lbo.ret = (int32_t)ret;
+        lbo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &lbo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1216,8 +1212,9 @@ static void laminate_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1321,38 +1318,37 @@ static void transfer_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    transfer_bcast_in_t* in = calloc(1, sizeof(*in));
-    transfer_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.transfer_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRANSFER;
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(transfer_bcast_in_t),
+                                  sizeof(transfer_bcast_out_t));
+    
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        transfer_bcast_in_t*  in  = sreq->req_state->inputs;
+        transfer_bcast_out_t* out = sreq->req_state->outputs;
+        
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.transfer_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRANSFER;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    req->req_state.bulk_buf = NULL;
-                    req->req_state.bulk_sz = 0;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -1361,7 +1357,7 @@ static void transfer_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         transfer_bcast_out_t tbo;
-        tbo.ret = (int32_t)ret;
+        tbo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &tbo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1369,8 +1365,9 @@ static void transfer_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1391,38 +1388,43 @@ int unifyfs_invoke_broadcast_transfer(int client_app,
            transfer_mode, gfid, dest_file);
 
     coll_request* coll = NULL;
-    transfer_bcast_in_t* in = calloc(1, sizeof(*in));
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    if ((NULL == in) || (NULL == req)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.transfer_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRANSFER;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, HG_HANDLE_NULL,
+                                  sizeof(transfer_bcast_in_t),
+                                  sizeof(transfer_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
+        transfer_bcast_in_t*  in  = sreq->req_state->inputs;
+        transfer_bcast_out_t* out = sreq->req_state->outputs;
+
         /* set input params */
         in->root        = (int32_t) glb_pmi_rank;
         in->gfid        = (int32_t) gfid;
         in->mode        = (int32_t) transfer_mode;
         in->dst_file    = (hg_const_string_t) strdup(dest_file);
 
-        hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.transfer_bcast_id;
-        server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRANSFER;
-        coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
-                                 glb_pmi_rank, (void*)in,
-                                 NULL, sizeof(transfer_bcast_out_t),
+        coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid, glb_pmi_rank,
+                                 (void*)in, (void*)out, sizeof(*out),
                                  HG_BULK_NULL, HG_BULK_NULL, NULL);
         if (NULL == coll) {
             ret = ENOMEM;
         } else {
+            coll->app_id = client_app;
+            coll->client_id = client_id;
+            coll->client_req_id = transfer_id;
+
+            /* collective takes ownership of inputs/outputs, so mark them
+               as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
             int rc = collective_forward(coll);
             if (rc == UNIFYFS_SUCCESS) {
-                coll->app_id = client_app;
-                coll->client_id = client_id;
-                coll->client_req_id = transfer_id;
-                req->req_type = rpc;
-                req->coll = coll;
-                req->req_state.handle = HG_HANDLE_NULL;
-                req->req_state.inputs = (void*) in;
-                req->req_state.bulk_buf = NULL;
-                req->req_state.bulk_sz = 0;
-                ret = sm_submit_service_request(req);
+                ret = sm_submit_service_request(sreq);
                 if (ret != UNIFYFS_SUCCESS) {
                     LOGERR("failed to submit coll request to svcmgr");
                 }
@@ -1447,38 +1449,37 @@ static void truncate_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    truncate_bcast_in_t* in = calloc(1, sizeof(*in));
-    truncate_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.truncate_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRUNCATE;
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(truncate_bcast_in_t),
+                                  sizeof(truncate_bcast_out_t));
+    
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        truncate_bcast_in_t*  in  = sreq->req_state->inputs;
+        truncate_bcast_out_t* out = sreq->req_state->outputs;
+
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.truncate_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_TRUNCATE;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    req->req_state.bulk_buf = NULL;
-                    req->req_state.bulk_sz = 0;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -1487,7 +1488,7 @@ static void truncate_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         truncate_bcast_out_t tbo;
-        tbo.ret = (int32_t)ret;
+        tbo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &tbo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1495,8 +1496,9 @@ static void truncate_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1553,38 +1555,36 @@ static void fileattr_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    fileattr_bcast_in_t* in = calloc(1, sizeof(*in));
-    fileattr_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.fileattr_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_FILEATTR;
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(fileattr_bcast_in_t),
+                                  sizeof(fileattr_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        fileattr_bcast_in_t*  in  = sreq->req_state->inputs;
+        fileattr_bcast_out_t* out = sreq->req_state->outputs;
+
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.fileattr_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_FILEATTR;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    req->req_state.bulk_buf = NULL;
-                    req->req_state.bulk_sz = 0;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -1593,7 +1593,7 @@ static void fileattr_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         fileattr_bcast_out_t fbo;
-        fbo.ret = (int32_t)ret;
+        fbo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &fbo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1601,8 +1601,9 @@ static void fileattr_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1660,38 +1661,36 @@ static void unlink_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    unlink_bcast_in_t* in = calloc(1, sizeof(*in));
-    unlink_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.unlink_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_UNLINK;
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(unlink_bcast_in_t),
+                                  sizeof(unlink_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        unlink_bcast_in_t*  in  = sreq->req_state->inputs;
+        unlink_bcast_out_t* out = sreq->req_state->outputs;
+
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.unlink_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_UNLINK;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    req->req_state.bulk_buf = NULL;
-                    req->req_state.bulk_sz = 0;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -1700,7 +1699,7 @@ static void unlink_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         unlink_bcast_out_t ubo;
-        ubo.ret = (int32_t)ret;
+        ubo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &ubo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1708,8 +1707,9 @@ static void unlink_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
 }
@@ -1763,41 +1763,36 @@ static void metaget_all_bcast_rpc(hg_handle_t handle)
     int ret = UNIFYFS_SUCCESS;
 
     coll_request* coll = NULL;
-    server_rpc_req_t* req = calloc(1, sizeof(*req));
-    metaget_all_bcast_in_t* in = calloc(1, sizeof(*in));
-    metaget_all_bcast_out_t* out = calloc(1, sizeof(*out));
-    if ((NULL == req) || (NULL == in) || (NULL == out)) {
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.metaget_all_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_METAGET;
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(metaget_all_bcast_in_t),
+                                  sizeof(metaget_all_bcast_out_t));
+    if (NULL == sreq) {
         ret = ENOMEM;
     } else {
-        /* get input params */
-        LOGDBG("BCAST_RPC: getting input params");
-        hg_return_t hret = margo_get_input(handle, in);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_get_input() failed - %s", HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
+        metaget_all_bcast_in_t*  in  = sreq->req_state->inputs;
+        metaget_all_bcast_out_t* out = sreq->req_state->outputs;
+
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
         } else {
-            LOGDBG("BCAST_RPC: creating collective");
-            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.metaget_all_bcast_id;
-            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_METAGET;
-            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
-                                     (void*)in, (void*)out, sizeof(*out),
-                                     HG_BULK_NULL, HG_BULK_NULL, NULL);
-            if (NULL == coll) {
-                ret = ENOMEM;
-            } else {
-                LOGDBG("BCAST_RPC: forwarding collective");
-                ret = collective_forward(coll);
-                if (ret == UNIFYFS_SUCCESS) {
-                    req->req_type = rpc;
-                    req->coll = coll;
-                    req->req_state.handle = handle;
-                    req->req_state.inputs = (void*) in;
-                    req->req_state.bulk_buf = NULL;
-                    req->req_state.bulk_sz = 0;
-                    ret = sm_submit_service_request(req);
-                    if (ret != UNIFYFS_SUCCESS) {
-                        LOGERR("failed to submit coll request to svcmgr");
-                    }
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
                 }
             }
         }
@@ -1806,7 +1801,7 @@ static void metaget_all_bcast_rpc(hg_handle_t handle)
     if (ret != UNIFYFS_SUCCESS) {
         /* report failure back to caller */
         metaget_all_bcast_out_t mgabo;
-        mgabo.ret = (int32_t)ret;
+        mgabo.ret = (int32_t) ret;
         hg_return_t hret = margo_respond(handle, &mgabo);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
@@ -1814,13 +1809,11 @@ static void metaget_all_bcast_rpc(hg_handle_t handle)
 
         if (NULL != coll) {
             collective_cleanup(coll);
-        } else {
-            margo_destroy(handle);
+        }
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
         }
     }
-
-    LOGDBG("BCAST_RPC: exiting metaget_all handler");
-
 }
 
 DEFINE_MARGO_RPC_HANDLER(metaget_all_bcast_rpc)

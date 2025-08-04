@@ -26,15 +26,20 @@
 
 // global variables
 ServerRpcContext_t* unifyfsd_rpc_context;
+
 bool margo_use_tcp = true;
 bool margo_lazy_connect; // = false
-int  margo_client_server_pool_sz = UNIFYFS_MARGO_POOL_SZ;
-int  margo_server_server_pool_sz = UNIFYFS_MARGO_POOL_SZ;
-double margo_client_server_timeout_msec =
-    UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC;
-double margo_server_server_timeout_msec =
-    UNIFYFS_MARGO_SERVER_SERVER_TIMEOUT_MSEC;
-int  margo_use_progress_thread = 1;
+
+int margo_use_progress_thread = 1;
+
+int margo_client_pool_sz = UNIFYFS_MARGO_POOL_SZ;
+int margo_client_retry_count = UNIFYFS_MARGO_CLIENT_RETRY_COUNT;
+int margo_client_timeout_msec = UNIFYFS_MARGO_CLIENT_TIMEOUT_MSEC;
+
+int margo_service_pool_sz = UNIFYFS_MARGO_POOL_SZ;
+int margo_service_retry_count = UNIFYFS_MARGO_SERVICE_RETRY_COUNT;
+int margo_service_timeout_msec = UNIFYFS_MARGO_SERVICE_TIMEOUT_MSEC;
+
 
 // records pmi rank, server address string, and server address
 // for each server for use in server-to-server rpcs
@@ -81,21 +86,21 @@ static margo_instance_id setup_remote_target(void)
 
     /* initialize margo */
     margo_instance_id mid = margo_init(margo_protocol, MARGO_SERVER_MODE,
-        margo_use_progress_thread, margo_server_server_pool_sz);
+        margo_use_progress_thread, margo_service_pool_sz);
     if (mid == MARGO_INSTANCE_NULL) {
         LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed",
                margo_protocol, margo_use_progress_thread,
-               margo_server_server_pool_sz);
+               margo_service_pool_sz);
         if (margo_protocol == PROTOCOL_MARGO_OFI_TCP) {
             /* try "ofi+sockets" instead */
             margo_protocol = PROTOCOL_MARGO_OFI_SOCKETS;
             mid = margo_init(margo_protocol, MARGO_SERVER_MODE,
                              margo_use_progress_thread,
-                             margo_server_server_pool_sz);
+                             margo_service_pool_sz);
             if (mid == MARGO_INSTANCE_NULL) {
                 LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed",
                        margo_protocol, margo_use_progress_thread,
-                       margo_server_server_pool_sz);
+                       margo_service_pool_sz);
                 return mid;
             }
         }
@@ -247,10 +252,10 @@ static margo_instance_id setup_local_target(void)
     /* initialize margo */
     const char* margo_protocol = PROTOCOL_MARGO_SHM;
     margo_instance_id mid = margo_init(margo_protocol, MARGO_SERVER_MODE,
-                     margo_use_progress_thread, margo_client_server_pool_sz);
+                     margo_use_progress_thread, margo_client_pool_sz);
     if (mid == MARGO_INSTANCE_NULL) {
         LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed", margo_protocol,
-               margo_use_progress_thread, margo_client_server_pool_sz);
+               margo_use_progress_thread, margo_client_pool_sz);
         return mid;
     }
 
@@ -619,7 +624,7 @@ static hg_handle_t create_client_handle(hg_id_t id,
 
 static int forward_to_client(hg_handle_t hdl, void* input_ptr)
 {
-    double timeout_msec = margo_client_server_timeout_msec;
+    double timeout_msec = margo_client_timeout_msec;
     hg_return_t hret = margo_forward_timed(hdl, input_ptr, timeout_msec);
     if (hret != HG_SUCCESS) {
         LOGWARN("margo_forward_timed() failed - %s", HG_Error_to_string(hret));

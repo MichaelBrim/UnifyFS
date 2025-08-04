@@ -622,8 +622,8 @@ int process_gfid_reads(unifyfs_client* client,
      * we allocate one, we should free this later if not NULL */
     read_req_t* reqs = NULL;
     if (client->use_node_local_extents) {
-        extents_list_t* list = calloc(1, sizeof(struct extents_list));
-        struct extents_list* cur = list;
+        extents_list_t* list = calloc(1, sizeof(extents_list_t));
+        extents_list_t* cur = list;
         int num_request_selected = 0;
         for (int i = 0; i < in_count; ++i) {
             int fid = unifyfs_fid_from_gfid(client, in_reqs[i].gfid);
@@ -642,7 +642,7 @@ int process_gfid_reads(unifyfs_client* client,
                 cur->value.length = filesize_offt - 1;
                 cur->value.gfid = in_reqs[i].gfid;
                 if (i < in_count - 1) {
-                    cur->next = calloc(1, sizeof(struct extents_list));
+                    cur->next = calloc(1, sizeof(extents_list_t));
                     cur->next->next = NULL;
                     cur = cur->next;
                 } else {
@@ -655,7 +655,7 @@ int process_gfid_reads(unifyfs_client* client,
             /* There are files which are laminated and
              * require sync of extents */
             size_t extent_count = 0;
-            unifyfs_client_index_t* extents = NULL;
+            unifyfs_chunk_index_t* extents = NULL;
             int rc =
                   invoke_client_node_local_extents_get_rpc(client,
                                                            num_request_selected,

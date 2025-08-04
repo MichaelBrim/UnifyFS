@@ -211,30 +211,16 @@ int unifyfs_client_rpc_finalize(void)
 
 /*--- Invocation methods for client-to-server RPCs ---*/
 
-#if 0 /* create and return a margo handle for given rpc id */
-static hg_handle_t create_handle(hg_id_t id)
-{
-    /* define a temporary to refer to global context */
-    client_rpc_context_t* ctx = client_rpc_context;
-
-    /* create handle for specified rpc */
-    hg_handle_t handle = HG_HANDLE_NULL;
-    hg_return_t hret = margo_create(ctx->mid, ctx->svr_addr, id, &handle);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_create() failed");
-    }
-    return handle;
-}
-#endif
-
 static int sync_call_server(rpc_state* rpc, const char* rpc_name)
 {
     int ret = UNIFYFS_SUCCESS;
-    LOGDBG("calling the %s rpc(%p) synchronously", rpc_name, rpc);
+    LOGDBG("calling the %s client-server rpc(%p)",
+           rpc_name, rpc);
     int rc = sync_rpc_request(rpc, client_rpc_context->timeout_msec,
                               client_rpc_context->retry_count);
     if (rc != 0) {
-        LOGERR("%s sync rpc(%p) request failed (rc=%d)", rpc_name, rpc, rc);
+        LOGERR("synchronous %s rpc(%p) request failed (rc=%d)",
+               rpc_name, rpc, rc);
         ret = rc;
     }
     return ret;
@@ -874,7 +860,7 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
                                              int num_req,
                                              extents_list_t* read_req,
                                              size_t* extent_count,
-                                             unifyfs_client_index_t** extents)
+                                             unifyfs_chunk_index_t** extents)
 {
     /* check that we have initialized margo */
     if (NULL == client_rpc_context) {
@@ -938,7 +924,7 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
             *extent_count = out.extent_count;
             void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_data,
                                                out.bulk_size, NULL);
-            *extents = (unifyfs_client_index_t*) out_buffer;
+            *extents = (unifyfs_chunk_index_t*) out_buffer;
         }
     } else {
         ret = rc;
@@ -1003,7 +989,7 @@ int invoke_client_get_gfids_rpc(unifyfs_client* client,
 }
 
 
-/*--- Handler methods for server-to-client RPCs ---*/
+/*--- Handler methods for server-to-client callback RPCs ---*/
 
 /* simple heartbeat ping rpc */
 static void unifyfs_heartbeat_rpc(hg_handle_t handle)

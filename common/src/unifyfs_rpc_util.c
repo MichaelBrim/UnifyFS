@@ -188,11 +188,6 @@ create_rpc_request(hg_id_t rpc_id,
                 if (NULL != new_rpc->outputs)
                     new_rpc->outputs_sz = output_sz;
             }
-
-            /* if (HG_BULK_NULL != bulk) {
-                new_rpc->bulk_buf = bulk;
-                new_rpc->bulk_sz = bulk_sz;
-            } */
         }
     }
     return new_rpc;
@@ -211,14 +206,16 @@ create_rpc_response(hg_handle_t handle,
         new_rpc->initiator = 0;
         new_rpc->handle = handle;
 
-        margo_instance_id mid = margo_hg_handle_get_instance(handle);
-        assert(mid != MARGO_INSTANCE_NULL);
-        new_rpc->mid = mid;
+        if (HG_HANDLE_NULL != handle) {
+            margo_instance_id mid = margo_hg_handle_get_instance(handle);
+            assert(mid != MARGO_INSTANCE_NULL);
+            new_rpc->mid = mid;
 
-        const struct hg_info* hgi = margo_get_info(handle);
-        assert(hgi);
-        new_rpc->rpc_id = hgi->id;
-
+            const struct hg_info* hgi = margo_get_info(handle);
+            assert(hgi);
+            new_rpc->rpc_id = hgi->id;
+        }
+        
         if (NULL != input) {
             new_rpc->inputs = input;
             new_rpc->have_input = 1;
@@ -248,35 +245,40 @@ int cleanup_rpc_state(rpc_state* rpc)
         LOGDBG("cleaning state for rpc(%p) with handle(%p)",
                rpc, rpc->handle);
 
-        if (NULL != rpc->inputs) {
-            if (!rpc->initiator && rpc->have_input) {
-                LOGDBG("calling margo_free_input() for rpc(%p)", rpc);
-                hret = margo_free_input(rpc->handle, rpc->inputs);
-                if (hret != HG_SUCCESS)
-                    LOGERR("margo_free_input() failed - %s",
-                           HG_Error_to_string(hret));
-            }
-            if (0 != rpc->inputs_sz) { /* free since we allocated it */
-                LOGDBG("freeing input args for rpc(%p)", rpc);
-                free(rpc->inputs);
-            }
+        if (!rpc->initiator && rpc->have_input) {
+            LOGDBG("calling margo_free_input() for rpc(%p)", rpc);
+            hret = margo_free_input(rpc->handle, rpc->inputs);
+            if (hret != HG_SUCCESS)
+                LOGERR("margo_free_input() failed - %s",
+                       HG_Error_to_string(hret));
         }
 
-        if (NULL != rpc->outputs) {
-            if (rpc->initiator && rpc->have_output) {
-                LOGDBG("calling margo_free_output() for rpc(%p)", rpc);
-                hret = margo_free_output(rpc->handle, rpc->outputs);
-                if (hret != HG_SUCCESS)
-                    LOGERR("margo_free_output() failed - %s",
-                           HG_Error_to_string(hret));
-            }
-            if (0 != rpc->outputs_sz) { /* free since we allocated it */
-                LOGDBG("freeing output args for rpc(%p)", rpc);
-                free(rpc->outputs);
-            }
+        if (rpc->initiator && rpc->have_output) {
+            LOGDBG("calling margo_free_output() for rpc(%p)", rpc);
+            hret = margo_free_output(rpc->handle, rpc->outputs);
+            if (hret != HG_SUCCESS)
+                LOGERR("margo_free_output() failed - %s",
+                       HG_Error_to_string(hret));
         }
 
         margo_destroy(rpc->handle);
+    }
+
+    if (HG_BULK_NULL != rpc->bulk) {
+        LOGDBG("calling margo_bulk_free(%p) for rpc(%p)", rpc->bulk, rpc);
+        margo_bulk_free(rpc->bulk);
+    }    
+
+    if ((NULL != rpc->inputs) && (0 != rpc->inputs_sz)) {
+        /* free since we allocated it */
+        LOGDBG("freeing input args for rpc(%p)", rpc);
+        free(rpc->inputs);
+    }
+
+    if ((NULL != rpc->outputs) && (0 != rpc->outputs_sz)) {
+        /* free since we allocated it */
+        LOGDBG("freeing output args for rpc(%p)", rpc);
+        free(rpc->outputs);
     }
 
     free(rpc);

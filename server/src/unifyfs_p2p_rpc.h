@@ -28,19 +28,20 @@ int hash_gfid_to_server(int gfid);
 
 /* server peer-to-peer (p2p) margo request structure */
 typedef struct {
-    margo_request request;
-    hg_addr_t     peer;
-    hg_handle_t   handle;
+    int peer_rank;
+    hg_addr_t peer;
+    rpc_state* req_state;
 } p2p_request;
 
 /* helper method to initialize peer request rpc handle */
-int init_p2p_request_handle(hg_id_t request_hgid,
-                            int peer_rank,
-                            p2p_request* req);
+int init_p2p_request(hg_id_t request_hgid,
+                     int peer_rank,
+                     void* input_args,
+                     void* output_args,
+                     p2p_request* req);
 
 /* helper method to forward peer rpc request */
-int forward_p2p_request(void* input_ptr,
-                        p2p_request* req);
+int forward_p2p_request(p2p_request* req);
 
 /* helper method to wait for peer rpc request completion */
 int wait_for_p2p_request(p2p_request* req);

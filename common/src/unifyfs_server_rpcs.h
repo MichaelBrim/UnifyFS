@@ -42,6 +42,7 @@ typedef enum {
     UNIFYFS_SERVER_RPC_LAMINATE,
     UNIFYFS_SERVER_RPC_METAGET,
     UNIFYFS_SERVER_RPC_METASET,
+    UNIFYFS_SERVER_RPC_SERVER_PID,
     UNIFYFS_SERVER_RPC_TRANSFER,
     UNIFYFS_SERVER_RPC_TRUNCATE,
     UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP,
@@ -58,9 +59,15 @@ typedef enum {
 /* structure to track server-to-server rpc request state */
 typedef struct {
     server_rpc_e req_type;
-    rpc_state req_state;
+    rpc_state* req_state;
     void* coll;
 } server_rpc_req_t;
+
+server_rpc_req_t* allocate_server_rpc_state(server_rpc_e rpc_type,
+                                            hg_handle_t handle,
+                                            size_t input_sz,
+                                            size_t output_sz);
+void release_server_rpc_state(server_rpc_req_t* sreq);
 
 /*---- Server Point-to-Point (p2p) RPCs ----*/
 
@@ -73,6 +80,16 @@ MERCURY_GEN_PROC(server_pid_out_t,
 DECLARE_MARGO_RPC_HANDLER(server_pid_rpc)
 
 /* Chunk read request */
+
+MERCURY_GEN_PROC(read_extent_chunks_in_t,
+                 ((unifyfs_extent_t)(extent))
+                 ((hg_bulk_t)(bulk_extent))
+                 ((hg_bulk_t)(bulk_chunks)))
+MERCURY_GEN_PROC(read_extent_chunks_out_t,
+                 ((int32_t)(ret))
+                 ((hg_size_t)(total_read)))
+DECLARE_MARGO_RPC_HANDLER(read_extent_chunks_rpc)
+
 MERCURY_GEN_PROC(chunk_read_request_in_t,
                  ((int32_t)(src_rank))
                  ((int32_t)(app_id))

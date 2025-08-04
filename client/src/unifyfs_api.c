@@ -207,7 +207,7 @@ unifyfs_rc unifyfs_initialize(const char* mountpoint,
     }
 
     /* Timeout to wait on rpc calls to server, in milliseconds */
-    int timeout_msecs = UNIFYFS_MARGO_CLIENT_SERVER_TIMEOUT_MSEC;
+    int timeout_msecs = UNIFYFS_MARGO_CLIENT_TIMEOUT_MSEC;
     cfgval = client_cfg->margo_client_timeout;
     if (cfgval != NULL) {
         rc = configurator_int_val(cfgval, &l);
@@ -215,7 +215,7 @@ unifyfs_rc unifyfs_initialize(const char* mountpoint,
             timeout_msecs = (double)l;
         }
     }
-    int timeout_retry = UNIFYFS_MARGO_CLIENT_SERVER_RETRY_COUNT;
+    int timeout_retry = UNIFYFS_MARGO_CLIENT_RETRY_COUNT;
     cfgval = client_cfg->margo_client_retry;
     if (cfgval != NULL) {
         rc = configurator_int_val(cfgval, &l);

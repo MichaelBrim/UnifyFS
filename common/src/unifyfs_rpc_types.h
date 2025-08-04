@@ -35,6 +35,7 @@ typedef struct rpc_state {
     
     void* bulk_buf;
     size_t bulk_sz;
+    hg_bulk_t bulk;    // set this to free bulk on cleanup
     
     int initiator;     // set to 1 when this process initiated rpc
     int have_input;    // set to 1 when margo_get_input() is successful
@@ -64,5 +65,11 @@ MERCURY_GEN_STRUCT_PROC(unifyfs_file_attr_t,
     ((sys_timespec_t)(mtime))
     ((hg_const_string_t)(filename))
 )
+
+/* encode/decode unifyfs_extent_t */
+MERCURY_GEN_STRUCT_PROC(unifyfs_extent_t,
+    ((hg_size_t)(offset))
+    ((hg_size_t)(length))
+    ((int32_t)(gfid)))
 
 #endif /* __UNIFYFS_RPC_TYPES_H */

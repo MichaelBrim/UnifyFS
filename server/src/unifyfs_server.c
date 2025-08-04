@@ -402,26 +402,6 @@ int main(int argc, char* argv[])
 
     LOGDBG("initializing RPC service");
 
-    rc = configurator_int_val(server_cfg.margo_client_timeout, &l);
-    if (0 == rc) {
-        margo_client_server_timeout_msec = (double) l;
-    }
-
-    rc = configurator_int_val(server_cfg.margo_server_timeout, &l);
-    if (0 == rc) {
-        margo_server_server_timeout_msec = (double) l;
-    }
-
-    rc = configurator_int_val(server_cfg.margo_client_pool_size, &l);
-    if (0 == rc) {
-        margo_client_server_pool_sz = l;
-    }
-
-    rc = configurator_int_val(server_cfg.margo_server_pool_size, &l);
-    if (0 == rc) {
-        margo_server_server_pool_sz = l;
-    }
-
     rc = configurator_bool_val(server_cfg.margo_lazy_connect, &b);
     if (0 == rc) {
         margo_lazy_connect = b;
@@ -430,6 +410,36 @@ int main(int argc, char* argv[])
     rc = configurator_bool_val(server_cfg.margo_tcp, &b);
     if (0 == rc) {
         margo_use_tcp = b;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_client_pool_size, &l);
+    if (0 == rc) {
+        margo_client_pool_sz = (int) l;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_client_retry, &l);
+    if (0 == rc) {
+        margo_client_retry_count = (int) l;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_client_timeout, &l);
+    if (0 == rc) {
+        margo_client_timeout_msec = (int) l;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_server_pool_size, &l);
+    if (0 == rc) {
+        margo_service_pool_sz = (int) l;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_server_retry, &l);
+    if (0 == rc) {
+        margo_service_retry_count = (int) l;
+    }
+
+    rc = configurator_int_val(server_cfg.margo_server_timeout, &l);
+    if (0 == rc) {
+        margo_service_timeout_msec = (int) l;
     }
 
     rc = margo_server_rpc_init();
