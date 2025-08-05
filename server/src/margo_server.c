@@ -437,20 +437,22 @@ int margo_server_rpc_init(void)
             margo_get_handler_pool(mid, &(unifyfsd_rpc_context->svr_rpc_pool));
 
             /* create a dedicated xstream+pool for collectives and transfers */
-            ABT_xstream coll_xstream, xfer_xstream;
-            ABT_pool coll_pool, xfer_pool;
+            ABT_xstream coll_xstream;
+            ABT_pool coll_pool;
             rc = ABT_xstream_create(ABT_SCHED_NULL, &coll_xstream);
-            assert(rc == 0);
+            assert(rc == ABT_SUCCESS);
             rc = ABT_xstream_get_main_pools(coll_xstream, 1, &coll_pool);
-            assert(rc == 0);
+            assert(rc == ABT_SUCCESS);
             unifyfsd_rpc_context->svr_coll_xstream = coll_xstream;
             unifyfsd_rpc_context->svr_coll_pool = coll_pool;
 
 #if 0 // TODO: convert pthread transfer threads to ULTs
+            ABT_xstream xfer_xstream;
+            ABT_pool xfer_pool;
             rc = ABT_xstream_create(ABT_SCHED_NULL, &xfer_xstream);
-            assert(rc == 0);
+            assert(rc == ABT_SUCCESS);
             rc = ABT_xstream_get_main_pools(xfer_xstream, 1, &xfer_pool);
-            assert(rc == 0);
+            assert(rc == ABT_SUCCESS);
             unifyfsd_rpc_context->svr_transfer_xstream = xfer_xstream;
             unifyfsd_rpc_context->svr_transfer_pool = xfer_pool;
 #endif
