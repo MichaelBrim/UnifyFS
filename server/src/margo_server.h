@@ -66,8 +66,10 @@ typedef struct ServerRpcContext {
     ABT_pool shm_rpc_pool;  /* pool for handling client request rpcs */
     margo_instance_id svr_mid;
     ABT_pool svr_rpc_pool;  /* pool for handling server request rpcs*/
-    ABT_pool svr_coll_pool; /* pool for handling collective rpcs */
-    ABT_pool svr_xfer_pool; /* pool for performing data transfers to/from external storage */
+    ABT_xstream svr_coll_xstream; /* execution stream for collective rpcs */
+    ABT_pool svr_coll_pool;       /* collectives execution stream pool */
+    ABT_xstream svr_transfer_xstream; /* execution stream for data transfers */
+    ABT_pool svr_transfer_pool;       /* transfers execution stream pool */
     server_rpcs_t rpcs;
 } ServerRpcContext_t;
 

@@ -443,13 +443,17 @@ int margo_server_rpc_init(void)
             assert(rc == 0);
             rc = ABT_xstream_get_main_pools(coll_xstream, 1, &coll_pool);
             assert(rc == 0);
+            unifyfsd_rpc_context->svr_coll_xstream = coll_xstream;
             unifyfsd_rpc_context->svr_coll_pool = coll_pool;
 
+#if 0 // TODO: convert pthread transfer threads to ULTs
             rc = ABT_xstream_create(ABT_SCHED_NULL, &xfer_xstream);
             assert(rc == 0);
             rc = ABT_xstream_get_main_pools(xfer_xstream, 1, &xfer_pool);
             assert(rc == 0);
-            unifyfsd_rpc_context->svr_xfer_pool = xfer_pool;
+            unifyfsd_rpc_context->svr_transfer_xstream = xfer_xstream;
+            unifyfsd_rpc_context->svr_transfer_pool = xfer_pool;
+#endif
 
             register_client_server_rpcs(unifyfsd_rpc_context->shm_mid);
             register_server_server_rpcs(unifyfsd_rpc_context->svr_mid);
@@ -488,11 +492,20 @@ int margo_server_rpc_finalize(void)
                 server->margo_svr_addr_str = NULL;
             }
         }
-
         free(server_infos);
 
         /* shut down margo */
         LOGDBG("finalizing server-server margo");
+        rc = ABT_xstream_join(ctx->svr_coll_xstream);
+        if (rc == ABT_SUCCESS) {
+            rc = ABT_xstream_free(&(ctx->svr_coll_xstream));
+        }
+#if 0 // TODO: convert pthread transfer threads to ULTs
+        rc = ABT_xstream_join(ctx->svr_transfer_xstream);
+        if (rc == ABT_SUCCESS) {
+            rc = ABT_xstream_free(&(ctx->svr_transfer_xstream));
+        }
+#endif
         margo_finalize(ctx->svr_mid);
 
         /* NOTE: 2nd call to margo_finalize() sometimes crashes - Margo bug? */
