@@ -97,6 +97,7 @@ int fopen_fclose_test(char* unifyfs_root)
        "%s:%d fclose worked: %s",
        __FILE__, __LINE__, strerror(err));
 
+#if 0 // gcc-14 warns about use-after-free, and we're using -Werror
     /* Verify closing already closed file fails with errno=EBADF */
     errno = 0;
     rc = fclose(fd);
@@ -104,6 +105,7 @@ int fopen_fclose_test(char* unifyfs_root)
     ok(rc == -1 && err == EBADF,
        "%s:%d fclose already closed file %s should fail (errno=%d): %s",
        __FILE__, __LINE__, path, err, strerror(err));
+#endif
 
     diag("Finished UNIFYFS_WRAP(fopen/fclose) tests");
 
