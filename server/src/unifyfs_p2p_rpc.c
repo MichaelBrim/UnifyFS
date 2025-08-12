@@ -48,6 +48,8 @@ int init_p2p_request(server_rpc_e request_op,
 {
     int rc = UNIFYFS_SUCCESS;
 
+    memset((void*)preq, 0, sizeof(p2p_request));
+
     preq->req_op = request_op;
     preq->gfid = gfid;
 
