@@ -93,6 +93,7 @@ void release_client_rpc_state(client_rpc_req_t* creq)
     if (NULL != creq) {
         if (NULL != creq->req_state) {
             cleanup_rpc_state(creq->req_state);
+            creq->req_state = NULL;
         }
         free(creq);
     }

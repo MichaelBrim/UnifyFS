@@ -133,6 +133,7 @@ void cleanup_p2p_request(p2p_request* preq)
             }
         }
         arraylist_free(preq->pending_client_reqs);
+        preq->pending_client_reqs = NULL;
     }
 }
 
@@ -1112,7 +1113,7 @@ clear_pending_metaget:
         // finish async responses
         for (int i = 0; i < num_pending; i++) {
             creq = (client_rpc_req_t*)
-                arraylist_get(preq->pending_client_reqs, i);
+                arraylist_remove(preq->pending_client_reqs, i);
             if (NULL != creq) {
                 rpc_name = NULL;
                 if (creq->req_type == UNIFYFS_CLIENT_RPC_METAGET) {
@@ -1122,6 +1123,7 @@ clear_pending_metaget:
                 } else {
                     rpc_name = unknown_rpc;
                 }
+                /* note: the following will release creq allocated state */
                 async_respond_client_finish(creq, rpc_name);
             }
         }
