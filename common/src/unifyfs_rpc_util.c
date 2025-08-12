@@ -303,7 +303,7 @@ int sync_rpc_request(rpc_state* rpc,
                     rpc->handle);
             if (!retry) {
                 done = 1;
-                ret = ETIMEDOUT;
+                ret = UNIFYFS_ERROR_TIMEOUT;
             } else {
                 retry -= 1;
             }

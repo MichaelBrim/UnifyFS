@@ -35,11 +35,39 @@ int rpc_metaget(unifyfs_fops_ctx_t* ctx,
                 int gfid,
                 unifyfs_file_attr_t* attr)
 {
-    if (gfid == ctx->app_id) {
-        /* should always have a local copy of mountpoint attrs */
-        return sm_get_fileattr(gfid, attr);
+    if (NULL == attr) {
+        return EINVAL;
     }
-    return unifyfs_invoke_metaget_rpc(gfid, attr);
+
+    int owner_rank = hash_gfid_to_server(gfid);
+
+    /* do local inode metadata lookup */
+    int rc = sm_get_fileattr(gfid, attr);
+    if (owner_rank == glb_pmi_rank) {
+         /* local server is the owner */
+        return rc;
+    } else if (gfid == ctx->app_id) {
+        /* should always have a local copy of mountpoint attrs */
+        return rc;
+    } else if (rc == UNIFYFS_SUCCESS) {
+        if (attr->is_laminated) {
+            /* if laminated, we already have final metadata locally */
+            return UNIFYFS_SUCCESS;
+        }
+
+        /* use cached attributes if within threshold */
+        struct timespec tp = {0};
+        clock_gettime(CLOCK_REALTIME, &tp);
+        time_t expire = attr->last_update + UNIFYFS_METADATA_CACHE_SECONDS;
+        if (tp.tv_sec <= expire) {
+            LOGINFO("using cached attributes for gfid=%d", gfid);
+            return UNIFYFS_SUCCESS;
+        } else {
+            LOGINFO("cached attributes for gfid=%d have expired "
+                    "(now=%d, expiration=%d)", gfid, tp.tv_sec, expire);
+        }
+    }
+    return unifyfs_invoke_metaget_rpc(ctx, gfid, attr);
 }
 
 static
@@ -48,7 +76,7 @@ int rpc_metaset(unifyfs_fops_ctx_t* ctx,
                 int attr_op,
                 unifyfs_file_attr_t* attr)
 {
-    return unifyfs_invoke_metaset_rpc(gfid, attr_op, attr);
+    return unifyfs_invoke_metaset_rpc(ctx, gfid, attr_op, attr);
 }
 
 /*
@@ -56,11 +84,8 @@ int rpc_metaset(unifyfs_fops_ctx_t* ctx,
  */
 static
 int rpc_fsync(unifyfs_fops_ctx_t* ctx,
-              int gfid,
-              client_rpc_req_t* client_req)
+              int gfid)
 {
-    size_t i;
-
     /* assume we'll succeed */
     int ret = UNIFYFS_SUCCESS;
 
@@ -101,7 +126,7 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
     }
     int* pending_gfid = (int*) svr_req->req_state->inputs;
 
-    for (i = 0; i < num_extents; i++) {
+    for (size_t i = 0; i < num_extents; i++) {
         unifyfs_index_t* meta = index_entry + i;
         extent_metadata* extent = extents + i;
         extent->start    = meta->file_pos;
@@ -113,7 +138,7 @@ int rpc_fsync(unifyfs_fops_ctx_t* ctx,
     }
 
     /* update local inode state first */
-    ret = unifyfs_inode_add_pending_extents(gfid, client_req,
+    ret = unifyfs_inode_add_pending_extents(gfid, ctx->client_req,
                                             num_extents, extents);
     if (ret) {
         LOGERR("failed to add pending local extents (gfid=%d, ret=%d)",
@@ -134,7 +159,34 @@ int rpc_filesize(unifyfs_fops_ctx_t* ctx,
                  int gfid,
                  size_t* filesize)
 {
-    return unifyfs_invoke_filesize_rpc(gfid, filesize);
+    if (NULL == filesize) {
+        return EINVAL;
+    }
+    *filesize = 0;
+
+    int owner_rank = hash_gfid_to_server(gfid);
+
+    /* do local inode metadata lookup */
+    unifyfs_file_attr_t attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    int rc = sm_get_fileattr(gfid, &attrs);
+    if (owner_rank == glb_pmi_rank) {
+         /* local server is the owner */
+         *filesize = (size_t) attrs.size;
+        return rc;
+    } else if (rc == UNIFYFS_SUCCESS) {
+        if (attrs.is_laminated) {
+            /* if laminated, we already have final metadata locally */
+            *filesize = attrs.size;
+            return UNIFYFS_SUCCESS;
+        }
+    }
+
+    int ret = unifyfs_invoke_metaget_rpc(ctx, gfid, &attrs);
+    if (ret == UNIFYFS_SUCCESS) {
+        *filesize = (size_t) attrs.size;
+    }
+    return ret;
 }
 
 static
@@ -164,14 +216,14 @@ int rpc_truncate(unifyfs_fops_ctx_t* ctx,
                  int gfid,
                  off_t len)
 {
-    return unifyfs_invoke_truncate_rpc(gfid, len);
+    return unifyfs_invoke_truncate_rpc(ctx, gfid, len);
 }
 
 static
 int rpc_laminate(unifyfs_fops_ctx_t* ctx,
                  int gfid)
 {
-    return unifyfs_invoke_laminate_rpc(gfid);
+    return unifyfs_invoke_laminate_rpc(ctx, gfid);
 }
 
 static

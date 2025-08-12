@@ -59,7 +59,8 @@ extern "C" {
  * @brief enum for UnifyFS return codes
  */
 typedef enum {
-    UNIFYFS_INVALID_RC = -2,
+    UNIFYFS_INVALID_RC = -3,
+    UNIFYFS_PENDING = -2,
     UNIFYFS_FAILURE = -1,
     UNIFYFS_SUCCESS = 0,
     /* Start our error numbers after the standard errno.h ones */

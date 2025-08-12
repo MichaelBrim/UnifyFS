@@ -28,16 +28,21 @@ int hash_gfid_to_server(int gfid);
 
 /* server peer-to-peer (p2p) margo request structure */
 typedef struct {
-    int peer_rank;
-    hg_addr_t peer;
     rpc_state* req_state;
+    hg_addr_t peer;
+    int peer_rank;
+    int gfid;             // target of remote request
+    server_rpc_e req_op;  // operation on target
+
+    /* client reqs dependent on this remote req (if any )*/
+    client_rpc_req_t* client_req;     // for only one
+    arraylist_t* pending_client_reqs; // for more than one
 } p2p_request;
 
-/* helper method to initialize peer request rpc handle */
-int init_p2p_request(hg_id_t request_hgid,
+/* helper method to initialize peer rpc request */
+int init_p2p_request(server_rpc_e request_op,
                      int peer_rank,
-                     void* input_args,
-                     void* output_args,
+                     int gfid,
                      p2p_request* req);
 
 /* helper method to forward peer rpc request */
@@ -45,6 +50,21 @@ int forward_p2p_request(p2p_request* req);
 
 /* helper method to wait for peer rpc request completion */
 int wait_for_p2p_request(p2p_request* req);
+
+/* helper method to cleanup peer rpc request state */
+void cleanup_p2p_request(p2p_request* preq);
+
+/* methods for pending remote request bookkeeping */
+bool check_pending_remote_request(int peer_rank,
+                                  int gfid,
+                                  server_rpc_e op,
+                                  p2p_request** preqp);
+int add_pending_remote_request(int peer_rank,
+                               int gfid,
+                               server_rpc_e op,
+                               client_rpc_req_t* client_req,
+                               p2p_request** preqp);
+int clear_pending_remote_request(p2p_request* preq);
 
 /*** Point-to-point Server RPCs ***/
 
@@ -101,24 +121,14 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
                                     chunk_read_req_t** chunks);
 
 /**
- * @brief Get file size for the target file
- *
- * @param gfid      target file
- * @param filesize  pointer to size variable
- *
- * @return success|failure
- */
-int unifyfs_invoke_filesize_rpc(int gfid,
-                                size_t* filesize);
-
-/**
  * @brief Laminate the target file
  *
  * @param gfid  target file
  *
  * @return success|failure
  */
-int unifyfs_invoke_laminate_rpc(int gfid);
+int unifyfs_invoke_laminate_rpc(unifyfs_fops_ctx_t* ctx,
+                                int gfid);
 
 /**
  * @brief Get metadata for target file
@@ -129,7 +139,8 @@ int unifyfs_invoke_laminate_rpc(int gfid);
  *
  * @return success|failure
  */
-int unifyfs_invoke_metaget_rpc(int gfid,
+int unifyfs_invoke_metaget_rpc(unifyfs_fops_ctx_t* ctx,
+                               int gfid,
                                unifyfs_file_attr_t* attrs);
 
 /**
@@ -141,7 +152,8 @@ int unifyfs_invoke_metaget_rpc(int gfid,
  *
  * @return success|failure
  */
-int unifyfs_invoke_metaset_rpc(int gfid, int attr_op,
+int unifyfs_invoke_metaset_rpc(unifyfs_fops_ctx_t* ctx,
+                               int gfid, int attr_op,
                                unifyfs_file_attr_t* attrs);
 
 /**
@@ -171,7 +183,8 @@ int unifyfs_invoke_transfer_rpc(int client_app,
  *
  * @return success|failure
  */
-int unifyfs_invoke_truncate_rpc(int gfid, size_t filesize);
+int unifyfs_invoke_truncate_rpc(unifyfs_fops_ctx_t* ctx,
+                                int gfid, size_t filesize);
 
 /**
  * @brief Report pid of local server to rank 0 server

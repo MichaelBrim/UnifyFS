@@ -35,7 +35,8 @@ extern "C" {
 /* enumerate the various server-to-server rpcs */
 typedef enum {
     UNIFYFS_SERVER_RPC_INVALID = 0,
-    UNIFYFS_SERVER_RPC_CHUNK_READ,
+    UNIFYFS_SERVER_RPC_CHUNK_READ_REQ,
+    UNIFYFS_SERVER_RPC_CHUNK_READ_RESP,
     UNIFYFS_SERVER_RPC_EXTENTS_ADD,
     UNIFYFS_SERVER_RPC_EXTENTS_FIND,
     UNIFYFS_SERVER_RPC_FILESIZE,
@@ -137,14 +138,6 @@ MERCURY_GEN_PROC(find_extents_out_t,
                  ((hg_bulk_t)(locations))
                  ((int32_t)(ret)))
 DECLARE_MARGO_RPC_HANDLER(find_extents_rpc)
-
-/* Get file size from owner */
-MERCURY_GEN_PROC(filesize_in_t,
-                 ((int32_t)(gfid)))
-MERCURY_GEN_PROC(filesize_out_t,
-                 ((hg_size_t)(filesize))
-                 ((int32_t)(ret)))
-DECLARE_MARGO_RPC_HANDLER(filesize_rpc)
 
 /* Laminate file at owner */
 MERCURY_GEN_PROC(laminate_in_t,

@@ -29,6 +29,8 @@
 
 #include <margo.h>
 
+#include "unifyfs_server_rpcs.h"
+
 typedef struct ServerRpcIds {
     /* server-server rpcs */
     hg_id_t bcast_progress_id;
@@ -93,7 +95,9 @@ int margo_connect_servers(void);
 
 hg_addr_t get_margo_server_address(int rank);
 
-
+hg_id_t get_rpc_info(server_rpc_e rpc,
+                     size_t* input_sz,
+                     size_t* output_sz);
 
 /* invokes the client heartbeat rpc function */
 int invoke_client_heartbeat_rpc(int app_id, int client_id);

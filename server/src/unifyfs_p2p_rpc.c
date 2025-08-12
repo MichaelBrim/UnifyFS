@@ -13,14 +13,22 @@
  */
 
 // common includes
+#include "unifyfs_meta.h"
 #include "unifyfs_rpc_util.h"
 #include "unifyfs_rpc_types.h"
+#include "unifyfs_client_rpcs.h"
 #include "unifyfs_server_rpcs.h"
 
 // server includes
 #include "unifyfs_global.h"
 #include "unifyfs_p2p_rpc.h"
 #include "unifyfs_group_rpc.h"
+
+
+/* arraylist and mutex to track pending remote requests */
+extern arraylist_t* pending_remote_requests;
+extern ABT_mutex pending_remote_requests_abt_sync;
+
 
 /*************************************************************************
  * Peer-to-peer RPC helper methods
@@ -32,14 +40,16 @@ int hash_gfid_to_server(int gfid)
     return gfid % glb_pmi_size;
 }
 
-/* helper method to initialize peer request rpc handle */
-int init_p2p_request(hg_id_t request_hgid,
+/* helper method to initialize peer rpc request */
+int init_p2p_request(server_rpc_e request_op,
                      int peer_rank,
-                     void* input_args,
-                     void* output_args,
+                     int gfid,
                      p2p_request* preq)
 {
     int rc = UNIFYFS_SUCCESS;
+
+    preq->req_op = request_op;
+    preq->gfid = gfid;
 
     /* get address for specified server rank */
     preq->peer_rank = peer_rank;
@@ -49,11 +59,13 @@ int init_p2p_request(hg_id_t request_hgid,
         return UNIFYFS_ERROR_MARGO;
     }
 
+    size_t input_sz, output_sz;
+    hg_id_t request_hgid = get_rpc_info(request_op, &input_sz, &output_sz);
     rpc_state* rpc = create_rpc_request(request_hgid,
                                         unifyfsd_rpc_context->svr_mid,
                                         preq->peer,
-                                        input_args, 0,
-                                        output_args, 0);
+                                        NULL, input_sz,
+                                        NULL, output_sz);
     if (NULL == rpc) {
         LOGERR("failed to create p2p request(%p) to server %d",
                preq, peer_rank);
@@ -96,13 +108,166 @@ int wait_for_p2p_request(p2p_request* preq)
 
 void cleanup_p2p_request(p2p_request* preq)
 {
-    /* cleanup rpc state */
+    /* cleanup p2p rpc state */
     int rc = cleanup_rpc_state(preq->req_state);
     if (rc != UNIFYFS_SUCCESS) {
         LOGERR("failed to cleanup rpc state for p2p request(%p)", preq);
     }
+
+    /* cleanup pending client reqs */
+    if (NULL != preq->pending_client_reqs) {
+        /* NOTE: normally, the pending client list should 
+         *       already be empty after sending responses */
+        client_rpc_req_t* creq;
+        int num_pending = arraylist_size(preq->pending_client_reqs);
+        for (int i = 0; i < num_pending; i++) {
+            creq = (client_rpc_req_t*)
+                arraylist_get(preq->pending_client_reqs, i);
+            if (creq != NULL) {
+                arraylist_remove(preq->pending_client_reqs, i);
+                LOGWARN("releasing leftover client rpc request(%p) state",
+                        creq);
+                release_client_rpc_state(creq);
+            }
+        }
+        arraylist_free(preq->pending_client_reqs);
+    }
 }
 
+int add_pending_remote_request(int peer_rank,
+                               int gfid,
+                               server_rpc_e op,
+                               client_rpc_req_t* client_req,
+                               p2p_request** preqp)
+{
+    int ret, rc;
+    int allocated = 0;
+    p2p_request* preq = NULL;
+
+    *preqp = NULL;
+
+    bool have_pending = check_pending_remote_request(peer_rank, gfid,
+                                                     op, &preq);
+    if (have_pending) {
+        ret = UNIFYFS_PENDING;
+    } else {
+        preq = (p2p_request*) calloc(1, sizeof(p2p_request));
+        if (NULL == preq) {
+            LOGERR("failed to allocate p2p_request");
+            return ENOMEM;
+        }
+        allocated = 1;
+        rc = init_p2p_request(op, peer_rank, gfid, preq);
+        if (rc != UNIFYFS_SUCCESS) {
+            LOGERR("failed to initialize p2p_request");
+            free(preq);
+            return rc;
+        }
+        preq->client_req = client_req;
+        ret = UNIFYFS_SUCCESS;
+    }
+
+    ABT_mutex_lock(pending_remote_requests_abt_sync);
+
+    if (NULL != client_req) {
+        /* add client request to pending remote */
+        if (have_pending) {
+            if (NULL == preq->pending_client_reqs) {
+                /* create list */
+                int max_clients = UNIFYFS_SERVER_MAX_APP_CLIENTS;
+                preq->pending_client_reqs = arraylist_create(max_clients);
+            }
+
+            /* add current pending client to list */
+            rc = arraylist_add(preq->pending_client_reqs, client_req);
+            if (-1 == rc) {
+                LOGERR("failed to add client req (%p) to pending list",
+                       client_req);
+                ABT_mutex_unlock(pending_remote_requests_abt_sync);
+                ret = rc;
+            }
+        }
+    }
+    
+    if (allocated) {
+        /* add new p2p_request to pending remotes list */
+        rc = arraylist_add(pending_remote_requests, preq);
+        if (rc == -1) {
+            LOGERR("failed to add p2p req(%p) to remote_requests arraylist",
+                   preq);
+            ABT_mutex_unlock(pending_remote_requests_abt_sync);
+            cleanup_p2p_request(preq);
+            free(preq);
+            ret = rc;
+        }
+    }
+
+    ABT_mutex_unlock(pending_remote_requests_abt_sync);
+
+    if ((ret == UNIFYFS_SUCCESS) || (ret == UNIFYFS_PENDING)) {
+        *preqp = preq;
+    }
+    return ret;
+}
+
+bool check_pending_remote_request(int peer_rank,
+                                  int gfid,
+                                  server_rpc_e op,
+                                  p2p_request** preqp)
+{
+    bool is_pending = false;
+    p2p_request* pending;
+
+    ABT_mutex_lock(pending_remote_requests_abt_sync);
+    if (NULL != pending_remote_requests) {
+        int num_pending = arraylist_size(pending_remote_requests);
+        for (int i = 0; i < num_pending; i++) {
+            pending = (p2p_request*) arraylist_get(pending_remote_requests, i);
+            if (NULL != pending) {
+                if ((pending->peer_rank == peer_rank) &&
+                    (pending->gfid == gfid) &&
+                    (pending->req_op == op)) {
+                    is_pending = true;
+                    *preqp = pending;
+                    break;
+                }
+            }
+        }
+    } else {
+        LOGERR("pending_remote_requests is NULL!");
+    }
+    ABT_mutex_unlock(pending_remote_requests_abt_sync);
+
+    return is_pending;
+}
+
+int clear_pending_remote_request(p2p_request* preq)
+{
+    int ret = UNIFYFS_FAILURE;
+    p2p_request* pending;
+
+    ABT_mutex_lock(pending_remote_requests_abt_sync);
+    if (NULL != pending_remote_requests) {
+        int num_pending = arraylist_size(pending_remote_requests);
+        for (int i = 0; i < num_pending; i++) {
+            pending = (p2p_request*) arraylist_get(pending_remote_requests, i);
+            if (pending == preq) {
+                pending = (p2p_request*)
+                    arraylist_remove(pending_remote_requests, i);
+                ret = UNIFYFS_SUCCESS;
+                break;
+            }
+        }
+    } else {
+        LOGERR("pending_remote_requests is NULL!");
+        ret = UNIFYFS_FAILURE;
+    }
+    ABT_mutex_unlock(pending_remote_requests_abt_sync);
+
+    return ret;
+}
+
+/* helper method to allocate rpc state for callee */
 server_rpc_req_t* allocate_server_rpc_state(server_rpc_e rpc_type,
                                             hg_handle_t handle,
                                             size_t input_sz,
@@ -115,6 +280,7 @@ server_rpc_req_t* allocate_server_rpc_state(server_rpc_e rpc_type,
         void* input = calloc(1, input_sz);
         if (NULL != input) {
             if (HG_HANDLE_NULL != handle) {
+                /* if we have a handle, try to get rpc input args */
                 hg_return_t hret = margo_get_input(handle, input);
                 if (hret != HG_SUCCESS) {
                     LOGERR("margo_get_input() failed - %s",
@@ -125,6 +291,7 @@ server_rpc_req_t* allocate_server_rpc_state(server_rpc_e rpc_type,
                 }
             }
             if (NULL != sreq) {
+                /* initialize rpc response */
                 rpc_state* state = create_rpc_response(handle, input,
                                                        NULL, output_sz);
                 if (NULL != state) {
@@ -168,8 +335,8 @@ static void sync_respond_server(server_rpc_req_t* sreq, const char* rpc_name)
     release_server_rpc_state(sreq);
 }
 
-#if 0 // TODO: determine if we need async server-server rpc responses
-static int async_respond_client(rpc_state* rpc, const char* rpc_name)
+#if 0 // MJB-TODO: determine if we need async server-server rpc responses
+static int async_respond_server(rpc_state* rpc, const char* rpc_name)
 {
     int ret = UNIFYFS_SUCCESS;
     LOGDBG("responding to the %s server-server rpc(%p) asynchronously",
@@ -183,7 +350,7 @@ static int async_respond_client(rpc_state* rpc, const char* rpc_name)
     return ret;
 }
 
-static void async_respond_finish(rpc_state* rpc, const char* rpc_name)
+static void async_respond_server_finish(rpc_state* rpc, const char* rpc_name)
 {
     LOGDBG("finishing the async %s rpc(%p)", rpc_name, rpc);
     int rc = async_rpc_response_finish(rpc);
@@ -222,31 +389,30 @@ int invoke_chunk_read_request_rpc(int dst_srvr_rank,
     hg_size_t bulk_sz = (hg_size_t)num_chunks * sizeof(chunk_read_req_t);
 
     /* forward request to file owner */
-    chunk_read_request_in_t in;
-    chunk_read_request_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.chunk_read_request_id;
-    int rc = init_p2p_request(req_hgid, dst_srvr_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_CHUNK_READ_REQ,
+                              dst_srvr_rank, INVALID_GFID, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    chunk_read_request_in_t*  in  = preq.req_state->inputs;
+    chunk_read_request_out_t* out = preq.req_state->outputs;
 
     /* fill input struct */
-    in.src_rank        = (int32_t) glb_pmi_rank;
-    in.app_id          = (int32_t) rdreq->app_id;
-    in.client_id       = (int32_t) rdreq->client_id;
-    in.req_id          = (int32_t) rdreq->req_ndx;
-    in.num_chks        = (int32_t) num_chunks;
-    in.total_data_size = (hg_size_t) remote_reads->total_sz;
-    in.bulk_size       = bulk_sz;
+    in->src_rank        = (int32_t) glb_pmi_rank;
+    in->app_id          = (int32_t) rdreq->app_id;
+    in->client_id       = (int32_t) rdreq->client_id;
+    in->req_id          = (int32_t) rdreq->req_ndx;
+    in->num_chks        = (int32_t) num_chunks;
+    in->total_data_size = (hg_size_t) remote_reads->total_sz;
+    in->bulk_size       = bulk_sz;
 
     /* register request buffer for bulk remote access */
     void* data_buf = remote_reads->reqs;
     hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid, 1,
                              &data_buf, &bulk_sz,
-                             HG_BULK_READ_ONLY, &in.bulk_handle);
+                             HG_BULK_READ_ONLY, &in->bulk_handle);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_bulk_create() failed - %s", HG_Error_to_string(hret));
         ret = UNIFYFS_ERROR_MARGO;
@@ -256,7 +422,7 @@ int invoke_chunk_read_request_rpc(int dst_srvr_rank,
         if (rc != UNIFYFS_SUCCESS) {
             LOGERR("forward of chunk-read request rpc to server[%d] failed",
                    dst_srvr_rank);
-            margo_bulk_free(in.bulk_handle);
+            margo_bulk_free(in->bulk_handle);
             cleanup_p2p_request(&preq);
             return UNIFYFS_ERROR_MARGO;
         }
@@ -267,12 +433,12 @@ int invoke_chunk_read_request_rpc(int dst_srvr_rank,
             ret = rc;
         } else {
             /* decode response */
-            ret = (int) out.ret;
+            ret = (int) out->ret;
             LOGDBG("Got chunk-read response from server[%d] - ret=%d",
                    dst_srvr_rank, ret);
         }
 
-        margo_bulk_free(in.bulk_handle);
+        margo_bulk_free(in->bulk_handle);
     }
     cleanup_p2p_request(&preq);
 
@@ -328,7 +494,7 @@ static void chunk_read_request_rpc(hg_handle_t handle)
 
     /* create client rpc state */
     server_rpc_req_t* sreq =
-        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_CHUNK_READ, handle,
+        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_CHUNK_READ_REQ, handle,
                                   sizeof(chunk_read_request_in_t),
                                   sizeof(chunk_read_request_out_t));
     if (NULL == sreq) {
@@ -357,16 +523,15 @@ int invoke_chunk_read_response_rpc(server_chunk_reads_t* scr)
     assert(dst_rank < (int)glb_num_servers);
 
     /* forward response to requesting server */
-    chunk_read_response_in_t in;
-    chunk_read_response_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.chunk_read_response_id;
-    int rc = init_p2p_request(req_hgid, dst_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_CHUNK_READ_RESP,
+                              dst_rank, INVALID_GFID, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    chunk_read_response_in_t*  in  = preq.req_state->inputs;
+    chunk_read_response_out_t* out = preq.req_state->outputs;
 
     /* get address and size of our response buffer */
     void* data_buf = (void*) scr->resp;
@@ -375,7 +540,7 @@ int invoke_chunk_read_response_rpc(server_chunk_reads_t* scr)
     /* register our response buffer for bulk remote read access */
     hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid,
                                          1, &data_buf, &bulk_sz,
-                                         HG_BULK_READ_ONLY, &in.bulk_handle);
+                                         HG_BULK_READ_ONLY, &in->bulk_handle);
     if (hret != HG_SUCCESS) {
         LOGERR("margo_bulk_create() failed - %s", HG_Error_to_string(hret));
         cleanup_p2p_request(&preq);
@@ -383,12 +548,12 @@ int invoke_chunk_read_response_rpc(server_chunk_reads_t* scr)
     }
 
     /* fill input struct */
-    in.src_rank  = (int32_t) glb_pmi_rank;
-    in.app_id    = (int32_t) scr->app_id;
-    in.client_id = (int32_t) scr->client_id;
-    in.req_id    = (int32_t) scr->rdreq_id;
-    in.num_chks  = (int32_t) scr->num_chunks;
-    in.bulk_size = bulk_sz;
+    in->src_rank  = (int32_t) glb_pmi_rank;
+    in->app_id    = (int32_t) scr->app_id;
+    in->client_id = (int32_t) scr->client_id;
+    in->req_id    = (int32_t) scr->rdreq_id;
+    in->num_chks  = (int32_t) scr->num_chunks;
+    in->bulk_size = bulk_sz;
 
     /* call the read response rpc */
     LOGDBG("invoking the chunk-read-response rpc function");
@@ -401,14 +566,14 @@ int invoke_chunk_read_response_rpc(server_chunk_reads_t* scr)
             ret = rc;
         } else {
             /* rpc executed, now decode response */
-            ret = (int) out.ret;
+            ret = (int) out->ret;
             LOGDBG("chunk-read-response rpc to server[%d] - ret=%d",
                    dst_rank, rc);
         }
     }
 
     /* free resources allocated for executing margo rpc */
-    margo_bulk_free(in.bulk_handle);
+    margo_bulk_free(in->bulk_handle);
     cleanup_p2p_request(&preq);
 
     /* free response data buffer */
@@ -432,12 +597,12 @@ static void chunk_read_response_rpc(hg_handle_t handle)
         ret = (int32_t) UNIFYFS_ERROR_MARGO;
     } else {
         /* extract params from input struct */
-        int src_rank   = (int)in.src_rank;
-        int app_id     = (int)in.app_id;
-        int client_id  = (int)in.client_id;
-        int req_id     = (int)in.req_id;
-        int num_chks   = (int)in.num_chks;
-        size_t bulk_sz = (size_t)in.bulk_size;
+        int src_rank   = (int) in.src_rank;
+        int app_id     = (int) in.app_id;
+        int client_id  = (int) in.client_id;
+        int req_id     = (int) in.req_id;
+        int num_chks   = (int) in.num_chks;
+        size_t bulk_sz = (size_t) in.bulk_size;
 
         LOGDBG("received read response from server[%d] (%d chunks)",
                src_rank, num_chks);
@@ -512,16 +677,15 @@ int unifyfs_invoke_add_extents_rpc(int gfid,
 
     /* forward request to file owner */
     int ret = UNIFYFS_SUCCESS;
-    add_extents_in_t in;
-    add_extents_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.extent_add_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_EXTENTS_ADD,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    add_extents_in_t*  in  = preq.req_state->inputs;
+    add_extents_out_t* out = preq.req_state->outputs;
 
     /* create a margo bulk transfer handle for extents array */
     hg_bulk_t bulk_handle;
@@ -537,10 +701,10 @@ int unifyfs_invoke_add_extents_rpc(int gfid,
     }
 
     /* fill rpc input struct and forward request */
-    in.src_rank    = (int32_t) glb_pmi_rank;
-    in.gfid        = (int32_t) gfid;
-    in.num_extents = (int32_t) num_extents;
-    in.extents     = bulk_handle;
+    in->src_rank    = (int32_t) glb_pmi_rank;
+    in->gfid        = (int32_t) gfid;
+    in->num_extents = (int32_t) num_extents;
+    in->extents     = bulk_handle;
     LOGDBG("forwarding add_extents(gfid=%d) to server[%d]", gfid, owner_rank);
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
@@ -552,7 +716,7 @@ int unifyfs_invoke_add_extents_rpc(int gfid,
             ret = rc;
         } else {
             /* get the result of the rpc */
-            ret = (int) out.ret;
+            ret = (int) out->ret;
         }
     }
 
@@ -681,17 +845,16 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
     }
 
     /* forward request to file owner */
-    find_extents_in_t in;
-    find_extents_out_t out;
     p2p_request preq;
     margo_instance_id mid = unifyfsd_rpc_context->svr_mid;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.extent_lookup_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_EXTENTS_FIND,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    find_extents_in_t*  in  = preq.req_state->inputs;
+    find_extents_out_t* out = preq.req_state->outputs;
 
     /* create a margo bulk transfer handle for extents array */
     hg_bulk_t bulk_req_handle;
@@ -706,10 +869,10 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
     }
 
     /* fill rpc input struct and forward request */
-    in.src_rank    = (int32_t) glb_pmi_rank;
-    in.gfid        = (int32_t) gfid;
-    in.num_extents = (int32_t) num_extents;
-    in.extents     = bulk_req_handle;
+    in->src_rank    = (int32_t) glb_pmi_rank;
+    in->gfid        = (int32_t) gfid;
+    in->num_extents = (int32_t) num_extents;
+    in->extents     = bulk_req_handle;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -725,14 +888,14 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
     }
 
     /* get the result of the rpc */
-    ret = out.ret;
+    ret = out->ret;
     if (ret == UNIFYFS_SUCCESS) {
         /* get number of chunks */
-        unsigned int n_chks = (unsigned int) out.num_locations;
+        unsigned int n_chks = (unsigned int) out->num_locations;
         if (n_chks > 0) {
             /* get bulk buffer with chunk locations */
             buf_sz = (size_t)n_chks * sizeof(chunk_read_req_t);
-            buf = pull_margo_bulk(preq.req_state->handle, out.locations,
+            buf = pull_margo_bulk(preq.req_state->handle, out->locations,
                                   buf_sz, NULL);
             if (NULL == buf) {
                 LOGERR("failed to pull chunk locations");
@@ -848,109 +1011,121 @@ DEFINE_MARGO_RPC_HANDLER(find_extents_rpc)
  *************************************************************************/
 
 /* Get file attributes for target file */
-int unifyfs_invoke_metaget_rpc(int gfid,
+int unifyfs_invoke_metaget_rpc(unifyfs_fops_ctx_t* ctx,
+                               int gfid,
                                unifyfs_file_attr_t* attrs)
 {
-    if (NULL == attrs) {
-        return EINVAL;
-    }
-
-    int owner_rank = hash_gfid_to_server(gfid);
-    int need_local_metadata = 0;
-
-    /* do local inode metadata lookup */
-    int rc = sm_get_fileattr(gfid, attrs);
-    if (owner_rank == glb_pmi_rank) {
-         /* local server is the owner */
-        return rc;
-    } else if (rc == UNIFYFS_SUCCESS) {
-        if (attrs->is_laminated) {
-            /* if laminated, we already have final metadata locally */
-            return UNIFYFS_SUCCESS;
-        }
-
-        /* use cached attributes if within threshold */
-        struct timespec tp = {0};
-        clock_gettime(CLOCK_REALTIME, &tp);
-        time_t expire = attrs->last_update + UNIFYFS_METADATA_CACHE_SECONDS;
-        if (tp.tv_sec <= expire) {
-            LOGINFO("using cached attributes for gfid=%d", gfid);
-            return UNIFYFS_SUCCESS;
-        } else {
-            LOGINFO("cached attributes for gfid=%d have expired "
-                    "(now=%d, expiration=%d)", gfid, tp.tv_sec, expire);
-        }
-    } else if (rc == ENOENT) {
-        /* local metaget gave ENOENT, need to create inode if file exists */
-        need_local_metadata = 1;
-    }
+    assert(NULL != attrs);
 
     int ret = UNIFYFS_SUCCESS;
-    rc = add_pending_metaget(gfid);
-    if (EEXIST == rc) {
-        /* wait for pending to finish */
-        do {
-            LOGDBG("waiting for pending metaget gfid=%d", gfid);
-            usleep(10000); /* sleep 10 ms */
-        } while (check_pending_metaget(gfid));
-
-        /* should have local copy now if file existed */
-        rc = sm_get_fileattr(gfid, attrs);
+    int owner_rank = hash_gfid_to_server(gfid);
+    client_rpc_req_t* creq = NULL;
+    if (NULL != ctx) {
+        /* have a client request that needs the response */
+        creq = ctx->client_req;
+    }
+    p2p_request* preq = NULL;
+    int rc = add_pending_remote_request(owner_rank, gfid,
+                                        UNIFYFS_SERVER_RPC_METAGET,
+                                        creq, &preq);
+    if (NULL == preq) {
+        LOGERR("failed to create pending remote metaget");
+        return UNIFYFS_FAILURE;
+    } else if (rc == UNIFYFS_PENDING) {
         return rc;
-    } else {
-        LOGDBG("added pending metaget gfid=%d", gfid);
+    }
 
-        /* forward request to file owner */
-        metaget_in_t in;
-        metaget_out_t out;
-        p2p_request preq;
-        hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.metaget_id;
-        rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_metaget;
-        }
+    assert(preq->req_state != NULL);
+    metaget_in_t*  in  = preq->req_state->inputs;
+    metaget_out_t* out = preq->req_state->outputs;
 
-        /* fill rpc input struct and forward request */
-        in.gfid = (int32_t) gfid;
-        rc = forward_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_metaget;
-        }
+    /* fill rpc input struct and forward request */
+    in->gfid = (int32_t) gfid;
+    rc = forward_p2p_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        ret = rc;
+        goto clear_pending_metaget;
+    }
 
-        /* wait for request completion */
-        rc = wait_for_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_metaget;
-        }
+    /* wait for request completion */
+    rc = wait_for_p2p_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        ret = rc;
+        goto clear_pending_metaget;
+    }
 
-        /* get the result of the rpc */
-        ret = out.ret;
-        if (ret == UNIFYFS_SUCCESS) {
-            *attrs = out.attr;
-            if (out.attr.filename != NULL) {
-                attrs->filename = strdup(out.attr.filename);
-            }
-            if (need_local_metadata) {
-                sm_set_fileattr(gfid, UNIFYFS_FILE_ATTR_OP_CREATE, attrs);
-            } else {
-                sm_set_fileattr(gfid, UNIFYFS_FILE_ATTR_OP_UTIME, attrs);
-            }
+    /* get the result of the rpc */
+    ret = (int) out->ret;
+    if (ret == UNIFYFS_SUCCESS) {
+        *attrs = out->attr;
+        if (out->attr.filename != NULL) {
+            attrs->filename = strdup(out->attr.filename);
         }
+        sm_cache_fileattr(gfid, attrs);
+    }
 
 clear_pending_metaget:
-        LOGDBG("clearing pending metaget gfid=%d", gfid);
-        rc = clear_pending_metaget(gfid);
-        if (rc != UNIFYFS_SUCCESS) {
-            LOGWARN("failed to clear pending metaget for gfid=%d", gfid);
-        }
-
-        cleanup_p2p_request(&preq);
+    LOGDBG("clearing pending metaget for gfid=%d", gfid);
+    rc = clear_pending_remote_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        LOGWARN("failed to clear pending metaget for gfid=%d", gfid);
     }
+
+    if (NULL != preq->pending_client_reqs) {
+        client_rpc_req_t* creq;
+        unifyfs_metaget_out_t* mout;
+        unifyfs_filesize_out_t* fout;
+        const char* rpc_name;
+        const char* metaget_rpc = "unifyfs_metaget";
+        const char* filesize_rpc = "unifyfs_filesize";
+        const char* unknown_rpc = "!!UNKNOWN-CLIENT-RPC!!";
+        int num_pending = arraylist_size(preq->pending_client_reqs);
+        // start async responses
+        for (int i = 0; i < num_pending; i++) {
+            creq = (client_rpc_req_t*)
+                arraylist_get(preq->pending_client_reqs, i);
+            if (NULL != creq) {
+                rpc_name = NULL;
+                if (creq->req_type == UNIFYFS_CLIENT_RPC_METAGET) {
+                    mout = creq->req_state->outputs;
+                    mout->ret = (int32_t) ret;
+                    mout->attr = *attrs;
+                    rpc_name = metaget_rpc;
+                } else if (creq->req_type == UNIFYFS_CLIENT_RPC_FILESIZE) {
+                    fout = creq->req_state->outputs;
+                    fout->ret = (int32_t) ret;
+                    fout->filesize = (hg_size_t) attrs->size;
+                    rpc_name = filesize_rpc;
+                } else {
+                    LOGWARN("unexpected client req type %d", creq->req_type);
+                    rpc_name = unknown_rpc;
+                }
+                rc = async_respond_client(creq, rpc_name);
+                if (rc != UNIFYFS_SUCCESS) {
+                    LOGERR("failed async response to client req(%p)",
+                           creq);
+                }
+            }
+        }
+        // finish async responses
+        for (int i = 0; i < num_pending; i++) {
+            creq = (client_rpc_req_t*)
+                arraylist_get(preq->pending_client_reqs, i);
+            if (NULL != creq) {
+                rpc_name = NULL;
+                if (creq->req_type == UNIFYFS_CLIENT_RPC_METAGET) {
+                    rpc_name = metaget_rpc;
+                } else if (creq->req_type == UNIFYFS_CLIENT_RPC_FILESIZE) {
+                    rpc_name = filesize_rpc;
+                } else {
+                    rpc_name = unknown_rpc;
+                }
+                async_respond_client_finish(creq, rpc_name);
+            }
+        }
+    }
+
+    cleanup_p2p_request(preq);
 
     return ret;
 }
@@ -1000,157 +1175,12 @@ DEFINE_MARGO_RPC_HANDLER(metaget_rpc)
 
 
 /*************************************************************************
- * File size request
- *************************************************************************/
-
-/*  Get current global size for the target file */
-int unifyfs_invoke_filesize_rpc(int gfid,
-                                size_t* filesize)
-{
-    if (NULL == filesize) {
-        return EINVAL;
-    }
-    *filesize = 0;
-
-    int owner_rank = hash_gfid_to_server(gfid);
-    int need_local_metadata = 0;
-
-    unifyfs_file_attr_t attrs;
-    memset(&attrs, 0, sizeof(attrs));
-
-    /* do local inode metadata lookup to check for laminated */
-    int rc = sm_get_fileattr(gfid, &attrs);
-    if (owner_rank == glb_pmi_rank) {
-        *filesize = (size_t) attrs.size;
-        return rc;
-    } else if (rc == UNIFYFS_SUCCESS) {
-        if (attrs.is_laminated) {
-            /* if laminated, we already have final metadata stored locally */
-            *filesize = (size_t) attrs.size;
-            return UNIFYFS_SUCCESS;
-        }
-
-        /* NOTE: unlike metaget above, we don't use cached metadata
-         *       for explicit file size lookups */
-    } else if (rc == ENOENT) {
-        /* local metaget gave ENOENT, need to create inode if file exists */
-        need_local_metadata = 1;
-    }
-
-    int ret = UNIFYFS_SUCCESS;
-    rc = add_pending_metaget(gfid);
-    if (EEXIST == rc) {
-        /* wait for pending to finish */
-        do {
-            usleep(10000); /* sleep 10 ms */
-        } while (check_pending_metaget(gfid));
-
-        /* should have local copy now if file existed */
-        rc = sm_get_fileattr(gfid, &attrs);
-        *filesize = (size_t) attrs.size;
-        return rc;
-    } else {
-        /* forward request to file owner */
-        metaget_in_t in;
-        metaget_out_t out;
-        p2p_request preq;
-        hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.metaget_id;
-        rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_fileattr;
-        }
-
-        /* fill rpc input struct and forward request */
-        in.gfid = (int32_t) gfid;
-        rc = forward_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_fileattr;
-        }
-
-        /* wait for request completion */
-        rc = wait_for_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            ret = rc;
-            goto clear_pending_fileattr;
-        }
-
-        /* get the output of the rpc */
-        ret = (int) out.ret;
-        if (ret == UNIFYFS_SUCCESS) {
-            attrs = out.attr;
-            *filesize = (size_t) attrs.size;
-            if (need_local_metadata) {
-                sm_set_fileattr(gfid, UNIFYFS_FILE_ATTR_OP_CREATE, &attrs);
-            } else {
-                sm_set_fileattr(gfid, UNIFYFS_FILE_ATTR_OP_UTIME, &attrs);
-            }
-        }
-
-clear_pending_fileattr:
-        rc = clear_pending_metaget(gfid);
-        if (rc != UNIFYFS_SUCCESS) {
-            LOGWARN("failed to clear pending metaget for gfid=%d", gfid);
-        }
-
-        cleanup_p2p_request(&preq);
-    }
-
-    return ret;
-}
-
-static void process_filesize_rpc(server_rpc_req_t* sreq)
-{
-    const char* rpc_name = "filesize";
-    filesize_in_t* in = sreq->req_state->inputs;
-    filesize_out_t* out = sreq->req_state->outputs;
-    assert((in != NULL) && (out != NULL));
-
-    /* get size of target file */
-    size_t filesize = 0;
-    int gfid = (int) in->gfid;
-    int ret = unifyfs_inode_get_filesize(gfid, &filesize);
-
-    out->ret = (int32_t) ret;
-    out->filesize = (hg_size_t) filesize;
-
-    /* send rpc response and cleanup request state */
-    sync_respond_server(sreq, rpc_name);
-}
-
-/* Filesize rpc handler */
-static void filesize_rpc(hg_handle_t handle)
-{
-    LOGDBG("filesize rpc handler");
-
-    /* create client rpc state */
-    server_rpc_req_t* sreq =
-        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_FILESIZE, handle,
-                                  sizeof(filesize_in_t),
-                                  sizeof(filesize_out_t));
-    if (NULL == sreq) {
-        filesize_out_t out;
-        out.ret = (int32_t) ENOMEM;
-        hg_return_t hret = margo_respond(handle, &out);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
-        }
-        return;
-    }
-    process_filesize_rpc(sreq);
-}
-DEFINE_MARGO_RPC_HANDLER(filesize_rpc)
-
-
-/*************************************************************************
  * File attributes update request
  *************************************************************************/
 
 /* Set metadata for target file */
-int unifyfs_invoke_metaset_rpc(int gfid,
+int unifyfs_invoke_metaset_rpc(unifyfs_fops_ctx_t* ctx,
+                               int gfid,
                                int attr_op,
                                unifyfs_file_attr_t* attrs)
 {
@@ -1170,21 +1200,20 @@ int unifyfs_invoke_metaset_rpc(int gfid,
     }
 
     /* forward request to file owner */
-    metaset_in_t in;
-    metaset_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.metaset_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_METASET,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    metaset_in_t*  in  = preq.req_state->inputs;
+    metaset_out_t* out = preq.req_state->outputs;
 
     /* fill rpc input struct and forward request */
-    in.gfid   = (int32_t) gfid;
-    in.fileop = (int32_t) attr_op;
-    in.attr   = *attrs;
+    in->gfid   = (int32_t) gfid;
+    in->fileop = (int32_t) attr_op;
+    in->attr   = *attrs;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -1199,7 +1228,7 @@ int unifyfs_invoke_metaset_rpc(int gfid,
     }
 
     /* get the result of the rpc */
-    ret = (int) out.ret;
+    ret = (int) out->ret;
     cleanup_p2p_request(&preq);
 
     return ret;
@@ -1253,7 +1282,8 @@ DEFINE_MARGO_RPC_HANDLER(metaset_rpc)
  *************************************************************************/
 
 /*  Laminate the target file */
-int unifyfs_invoke_laminate_rpc(int gfid)
+int unifyfs_invoke_laminate_rpc(unifyfs_fops_ctx_t* ctx,
+                                int gfid)
 {
     int ret;
     int owner_rank = hash_gfid_to_server(gfid);
@@ -1263,19 +1293,18 @@ int unifyfs_invoke_laminate_rpc(int gfid)
     }
 
     /* forward request to file owner */
-    laminate_in_t in;
-    laminate_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.laminate_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_LAMINATE,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    laminate_in_t*  in  = preq.req_state->inputs;
+    laminate_out_t* out = preq.req_state->outputs;
 
     /* fill rpc input struct and forward request */
-    in.gfid = (int32_t) gfid;
+    in->gfid = (int32_t) gfid;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -1290,7 +1319,7 @@ int unifyfs_invoke_laminate_rpc(int gfid)
     }
 
     /* get the output of the rpc */
-    ret = (int) out.ret;
+    ret = (int) out->ret;
     cleanup_p2p_request(&preq);
 
     return ret;
@@ -1356,25 +1385,24 @@ int unifyfs_invoke_transfer_rpc(int client_app,
     }
 
     /* forward request to file owner */
-    transfer_in_t in;
-    transfer_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.transfer_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_TRANSFER,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    transfer_in_t*  in  = preq.req_state->inputs;
+    transfer_out_t* out = preq.req_state->outputs;
 
     /* fill rpc input struct and forward request */
-    in.src_rank    = (int32_t) glb_pmi_rank;
-    in.client_app  = (int32_t) client_app;
-    in.client_id   = (int32_t) client_id;
-    in.transfer_id = (int32_t) transfer_id;
-    in.gfid        = (int32_t) gfid;
-    in.mode        = (int32_t) transfer_mode;
-    in.dst_file    = (hg_const_string_t) dest_file;
+    in->src_rank    = (int32_t) glb_pmi_rank;
+    in->client_app  = (int32_t) client_app;
+    in->client_id   = (int32_t) client_id;
+    in->transfer_id = (int32_t) transfer_id;
+    in->gfid        = (int32_t) gfid;
+    in->mode        = (int32_t) transfer_mode;
+    in->dst_file    = (hg_const_string_t) dest_file;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -1389,7 +1417,7 @@ int unifyfs_invoke_transfer_rpc(int client_app,
     }
 
     /* get the result of the rpc */
-    int ret = (int) out.ret;
+    int ret = (int) out->ret;
     cleanup_p2p_request(&preq);
 
     return ret;
@@ -1451,7 +1479,8 @@ DEFINE_MARGO_RPC_HANDLER(transfer_rpc)
  *************************************************************************/
 
 /* Truncate the target file */
-int unifyfs_invoke_truncate_rpc(int gfid,
+int unifyfs_invoke_truncate_rpc(unifyfs_fops_ctx_t* ctx,
+                                int gfid,
                                 size_t filesize)
 {
     int owner_rank = hash_gfid_to_server(gfid);
@@ -1460,20 +1489,19 @@ int unifyfs_invoke_truncate_rpc(int gfid,
     }
 
     /* forward request to file owner */
-    truncate_in_t in;
-    truncate_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.truncate_id;
-    int rc = init_p2p_request(req_hgid, owner_rank, 
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_TRUNCATE,
+                              owner_rank, gfid, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    truncate_in_t*  in  = preq.req_state->inputs;
+    truncate_out_t* out = preq.req_state->outputs;
 
     /* fill rpc input struct and forward request */
-    in.gfid     = (int32_t) gfid;
-    in.filesize = (hg_size_t) filesize;
+    in->gfid     = (int32_t) gfid;
+    in->filesize = (hg_size_t) filesize;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -1488,7 +1516,7 @@ int unifyfs_invoke_truncate_rpc(int gfid,
     }
 
     /* get the output of the rpc */
-    int ret = (int) out.ret;
+    int ret = (int) out->ret;
     cleanup_p2p_request(&preq);
 
     return ret;
@@ -1542,20 +1570,19 @@ DEFINE_MARGO_RPC_HANDLER(truncate_rpc)
 int unifyfs_invoke_server_pid_rpc(void)
 {
     /* forward pid to server rank 0 */
-    server_pid_in_t in;
-    server_pid_out_t out;
     p2p_request preq;
-    hg_id_t req_hgid = unifyfsd_rpc_context->rpcs.server_pid_id;
-    int rc = init_p2p_request(req_hgid, 0,
-                              (void*)&in, (void*)&out,
-                              &preq);
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_SERVER_PID,
+                              0, INVALID_GFID, &preq);
     if (rc != UNIFYFS_SUCCESS) {
         return rc;
     }
+    assert(preq.req_state != NULL);
+    server_pid_in_t*  in  = preq.req_state->inputs;
+    server_pid_out_t* out = preq.req_state->outputs;
 
     /* fill rpc input struct and forward request */
-    in.rank = glb_pmi_rank;
-    in.pid = server_pid;
+    in->rank = glb_pmi_rank;
+    in->pid = server_pid;
     rc = forward_p2p_request(&preq);
     if (rc != UNIFYFS_SUCCESS) {
         cleanup_p2p_request(&preq);
@@ -1570,7 +1597,7 @@ int unifyfs_invoke_server_pid_rpc(void)
     }
 
     /* get the output of the rpc */
-    int ret = (int) out.ret;
+    int ret = (int) out->ret;
     cleanup_p2p_request(&preq);
 
     return ret;

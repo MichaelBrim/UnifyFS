@@ -18,12 +18,13 @@
 #include "unifyfs_configurator.h"
 #include "unifyfs_log.h"
 #include "unifyfs_meta.h"
-#include "unifyfs_request_manager.h"
+#include "unifyfs_client_rpcs.h"
 
 /*
  * extra information that we need to pass for file operations.
  */
 struct _unifyfs_fops_ctx {
+    client_rpc_req_t* client_req;
     int app_id;
     int client_id;
     int mread_id;
@@ -33,7 +34,7 @@ typedef struct _unifyfs_fops_ctx unifyfs_fops_ctx_t;
 typedef int (*unifyfs_fops_init_t)(unifyfs_cfg_t* cfg);
 
 typedef int (*unifyfs_fops_fsync_t)(unifyfs_fops_ctx_t* ctx,
-                                    int gfid, client_rpc_req_t* client_req);
+                                    int gfid);
 
 typedef int (*unifyfs_fops_filesize_t)(unifyfs_fops_ctx_t* ctx,
                                        int gfid, size_t* filesize);
@@ -122,14 +123,13 @@ static inline int unifyfs_fops_filesize(unifyfs_fops_ctx_t* ctx,
 }
 
 static inline int unifyfs_fops_fsync(unifyfs_fops_ctx_t* ctx,
-                                     int gfid,
-                                     client_rpc_req_t* client_req)
+                                     int gfid)
 {
     if (!global_fops_tab->fsync) {
         return ENOSYS;
     }
 
-    return global_fops_tab->fsync(ctx, gfid, client_req);
+    return global_fops_tab->fsync(ctx, gfid);
 }
 
 static inline int unifyfs_fops_laminate(unifyfs_fops_ctx_t* ctx, int gfid)

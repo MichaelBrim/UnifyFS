@@ -68,6 +68,13 @@ client_rpc_req_t* allocate_client_rpc_state(client_rpc_e rpc_type,
                                             size_t output_sz);
 void release_client_rpc_state(client_rpc_req_t* creq);
 
+void sync_respond_client(client_rpc_req_t* creq,
+                         const char* rpc_name);
+int async_respond_client(client_rpc_req_t* creq,
+                         const char* rpc_name);
+void async_respond_client_finish(client_rpc_req_t* creq,
+                                 const char* rpc_name);
+
 /* unifyfs_attach_rpc (client => server)
  *
  * initialize server access to client's shared memory and file state */

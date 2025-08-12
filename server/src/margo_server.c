@@ -177,11 +177,6 @@ static void register_server_server_rpcs(margo_instance_id mid)
             fileattr_bcast_in_t, fileattr_bcast_out_t, fileattr_bcast_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
-    unifyfsd_rpc_context->rpcs.filesize_id =
-        MARGO_REGISTER_PROVIDER(mid, "filesize_rpc",
-            filesize_in_t, filesize_out_t, filesize_rpc,
-            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
-
     unifyfsd_rpc_context->rpcs.laminate_id =
         MARGO_REGISTER_PROVIDER(mid, "laminate_rpc",
             laminate_in_t, laminate_out_t, laminate_rpc,
@@ -610,6 +605,111 @@ hg_addr_t get_margo_server_address(int rank)
     }
     return addr;
 }
+
+hg_id_t get_rpc_info(server_rpc_e rpc,
+                     size_t* input_sz,
+                     size_t* output_sz)
+{
+    hg_id_t id = 0;
+    *input_sz = 0;
+    *output_sz = 0;
+    switch (rpc) {
+    case UNIFYFS_SERVER_RPC_CHUNK_READ_REQ:
+        id = unifyfsd_rpc_context->rpcs.chunk_read_request_id;
+        *input_sz = sizeof(chunk_read_request_in_t);
+        *output_sz = sizeof(chunk_read_request_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_CHUNK_READ_RESP:
+        id = unifyfsd_rpc_context->rpcs.chunk_read_response_id;
+        *input_sz = sizeof(chunk_read_response_in_t);
+        *output_sz = sizeof(chunk_read_response_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_EXTENTS_ADD:
+        id = unifyfsd_rpc_context->rpcs.extent_add_id;
+        *input_sz = sizeof(add_extents_in_t);
+        *output_sz = sizeof(add_extents_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_EXTENTS_FIND:
+        id = unifyfsd_rpc_context->rpcs.extent_lookup_id;
+        *input_sz = sizeof(find_extents_in_t);
+        *output_sz = sizeof(find_extents_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_LAMINATE:
+        id = unifyfsd_rpc_context->rpcs.laminate_id;
+        *input_sz = sizeof(laminate_in_t);
+        *output_sz = sizeof(laminate_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_METAGET:
+        id = unifyfsd_rpc_context->rpcs.metaget_id;
+        *input_sz = sizeof(metaget_in_t);
+        *output_sz = sizeof(metaget_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_METASET:
+        id = unifyfsd_rpc_context->rpcs.metaset_id;
+        *input_sz = sizeof(metaset_in_t);
+        *output_sz = sizeof(metaset_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_SERVER_PID:
+        id = unifyfsd_rpc_context->rpcs.server_pid_id;
+        *input_sz = sizeof(server_pid_in_t);
+        *output_sz = sizeof(server_pid_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_TRANSFER:
+        id = unifyfsd_rpc_context->rpcs.transfer_id;
+        *input_sz = sizeof(transfer_in_t);
+        *output_sz = sizeof(transfer_out_t);
+        break;
+    case UNIFYFS_SERVER_RPC_TRUNCATE:
+        id = unifyfsd_rpc_context->rpcs.truncate_id;
+        *input_sz = sizeof(truncate_in_t);
+        *output_sz = sizeof(truncate_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP:
+        id = unifyfsd_rpc_context->rpcs.bootstrap_complete_bcast_id;
+        *input_sz = sizeof(bootstrap_complete_bcast_in_t);
+        *output_sz = sizeof(bootstrap_complete_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS:
+        id = unifyfsd_rpc_context->rpcs.extent_bcast_id;
+        *input_sz = sizeof(extent_bcast_in_t);
+        *output_sz = sizeof(extent_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_FILEATTR:
+        id = unifyfsd_rpc_context->rpcs.fileattr_bcast_id;
+        *input_sz = sizeof(fileattr_bcast_in_t);
+        *output_sz = sizeof(fileattr_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_LAMINATE:
+        id = unifyfsd_rpc_context->rpcs.laminate_bcast_id;
+        *input_sz = sizeof(laminate_bcast_in_t);
+        *output_sz = sizeof(laminate_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_METAGET:
+        id = unifyfsd_rpc_context->rpcs.metaget_all_bcast_id;
+        *input_sz = sizeof(metaget_all_bcast_in_t);
+        *output_sz = sizeof(metaget_all_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_TRANSFER:
+        id = unifyfsd_rpc_context->rpcs.transfer_bcast_id;
+        *input_sz = sizeof(transfer_bcast_in_t);
+        *output_sz = sizeof(transfer_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_TRUNCATE:
+        id = unifyfsd_rpc_context->rpcs.truncate_bcast_id;
+        *input_sz = sizeof(truncate_bcast_in_t);
+        *output_sz = sizeof(truncate_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_UNLINK:
+        id = unifyfsd_rpc_context->rpcs.unlink_bcast_id;
+        *input_sz = sizeof(unlink_bcast_in_t);
+        *output_sz = sizeof(unlink_bcast_out_t);
+        break;
+    default:
+        break;
+    }
+    return id;
+}
+
 
 /* MARGO CLIENT-SERVER RPC INVOCATION FUNCTIONS */
 

@@ -52,6 +52,8 @@ UNIFYFS_ERROR_ENUMERATOR
 const char* unifyfs_rc_enum_str(unifyfs_rc rc)
 {
     switch (rc) {
+    case UNIFYFS_PENDING:
+        return "UNIFYFS_PENDING";
     case UNIFYFS_FAILURE:
         return "UNIFYFS_FAILURE";
     case UNIFYFS_SUCCESS:
@@ -79,6 +81,8 @@ char posix_errstr[1024];
 const char* unifyfs_rc_enum_description(unifyfs_rc rc)
 {
     switch (rc) {
+    case UNIFYFS_PENDING:
+        return "Pending";
     case UNIFYFS_FAILURE:
         return "Failure";
     case UNIFYFS_SUCCESS:
@@ -103,6 +107,8 @@ unifyfs_rc unifyfs_rc_enum_from_str(const char* s)
         return UNIFYFS_SUCCESS;
     } else if (strcmp(s, "Failure") == 0) {
         return UNIFYFS_FAILURE;
+    } else if (strcmp(s, "Pending") == 0) {
+        return UNIFYFS_PENDING;
     }
 #define ENUMITEM(name, desc)                  \
     else if (strcmp(s, #name) == 0) {         \
@@ -129,9 +135,13 @@ int unifyfs_rc_errno(unifyfs_rc rc)
         return 0;
     } else if (rc == UNIFYFS_INVALID_RC) {
         return EINVAL;
+    } else if (rc == UNIFYFS_PENDING) {
+        return EINPROGRESS;
+    } else if (rc == UNIFYFS_ERROR_TIMEOUT) {
+        return ETIMEDOUT;
     } else if ((rc == UNIFYFS_FAILURE) ||
               ((rc > UNIFYFS_BEGIN_ERRORS) && (rc < UNIFYFS_END_ERRORS))) {
-        /* none of our custom errors have good errno counterparts, use EIO */
+        /* most of our custom errors don't have errno equivalents, use EIO */
         return EIO;
     } else {
         /* should be a normal errno value already */

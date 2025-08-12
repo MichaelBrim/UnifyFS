@@ -78,6 +78,9 @@ int sm_set_fileattr(int gfid,
                     int file_op,
                     unifyfs_file_attr_t* attrs);
 
+int sm_cache_fileattr(int gfid,
+                      unifyfs_file_attr_t* attrs);
+
 int sm_add_extents(int gfid,
                    size_t num_extents,
                    extent_metadata* extents);

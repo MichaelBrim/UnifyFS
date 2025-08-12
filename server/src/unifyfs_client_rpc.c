@@ -98,7 +98,7 @@ void release_client_rpc_state(client_rpc_req_t* creq)
     }
 }
 
-static void sync_respond_client(client_rpc_req_t* creq, const char* rpc_name)
+void sync_respond_client(client_rpc_req_t* creq, const char* rpc_name)
 {
     rpc_state* rpc = creq->req_state;
     LOGDBG("responding to the %s client-server rpc(%p)",
@@ -111,10 +111,10 @@ static void sync_respond_client(client_rpc_req_t* creq, const char* rpc_name)
     release_client_rpc_state(creq);
 }
 
-#if 0 // TODO: determine if we need async client-server rpc responses
-static int async_respond_client(rpc_state* rpc, const char* rpc_name)
+int async_respond_client(client_rpc_req_t* creq, const char* rpc_name)
 {
     int ret = UNIFYFS_SUCCESS;
+    rpc_state* rpc = creq->req_state;
     LOGDBG("responding to the %s client-server rpc(%p) asynchronously",
            rpc_name, rpc);
     int rc = async_rpc_response(rpc, margo_client_retry_count);
@@ -126,17 +126,18 @@ static int async_respond_client(rpc_state* rpc, const char* rpc_name)
     return ret;
 }
 
-static void async_respond_finish(rpc_state* rpc, const char* rpc_name)
+void async_respond_client_finish(client_rpc_req_t* creq, const char* rpc_name)
 {
-    LOGDBG("finishing the async %s rpc(%p)", rpc_name, rpc);
+    rpc_state* rpc = creq->req_state;
+    LOGDBG("finishing the async response %s rpc(%p)", rpc_name, rpc);
     int rc = async_rpc_response_finish(rpc);
     if (rc != 0) {
         LOGERR("%s async rpc(%p) response finish failed (rc=%d)",
                rpc_name, rpc, rc);
     }
-    cleanup_rpc_state(rpc);
+    release_client_rpc_state(creq);
 }
-#endif
+
 
 #if 0 // NOT YET USED
 static int sync_call_client(rpc_state* rpc, const char* rpc_name)
@@ -257,8 +258,9 @@ static void create_directory(int app_id,
     fattr.gid = getgid();
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = app_id,
-        .client_id = client_id,
+        .client_req = NULL,
+        .app_id     = app_id,
+        .client_id  = client_id,
     };
     int attr_op = UNIFYFS_FILE_ATTR_OP_CREATE;
     int rc = unifyfs_fops_metaset(&ctx, app_id, attr_op, &fattr);
@@ -375,24 +377,26 @@ void process_client_metaget_rpc(client_rpc_req_t* creq)
     LOGDBG("getting metadata for gfid=%d", gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
 
     unifyfs_file_attr_t fattr;
     memset(&fattr, 0, sizeof(fattr));
 
     ret = unifyfs_fops_metaget(&ctx, gfid, &fattr);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGDBG("unifyfs_fops_metaget() failed");
-    } else {
-        out->attr = fattr;
+    if (ret != UNIFYFS_PENDING) {
+        out->ret = (int32_t) ret;
+        if (ret == UNIFYFS_SUCCESS) {
+            out->attr = fattr;
+        } else {
+            LOGDBG("unifyfs_fops_metaget() failed");
+        }
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
     }
-    out->ret = (int32_t) ret;
-    
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_metaset_rpc(client_rpc_req_t* creq)
@@ -410,8 +414,9 @@ void process_client_metaset_rpc(client_rpc_req_t* creq)
     LOGDBG("setting metadata (op=%d) for gfid=%d", attr_op, gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
     
     unifyfs_file_attr_t fattr = in->attr;
@@ -430,19 +435,21 @@ void process_client_metaset_rpc(client_rpc_req_t* creq)
     }
 
     ret = unifyfs_fops_metaset(&ctx, gfid, attr_op, &fattr);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGDBG("unifyfs_fops_metaset() failed");
-    }
+    if (ret != UNIFYFS_PENDING) {
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGDBG("unifyfs_fops_metaset() failed");
+        }
 
-    if (NULL != fattr.filename) {
-        free(fattr.filename);
-    }
-    
-    out->ret = (int32_t) ret;
+        if (NULL != fattr.filename) {
+            free(fattr.filename);
+        }
+        
+        out->ret = (int32_t) ret;
 
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
+    }
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_filesize_rpc(client_rpc_req_t* creq)
@@ -458,22 +465,25 @@ void process_client_filesize_rpc(client_rpc_req_t* creq)
     LOGDBG("getting file size for gfid=%d", gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
 
     size_t filesize = 0;
     ret = unifyfs_fops_filesize(&ctx, gfid, &filesize);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("unifyfs_fops_filesize() failed");
+    if (ret != UNIFYFS_PENDING) {
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGERR("unifyfs_fops_filesize() failed");
+        }
+        
+        out->filesize = (hg_size_t) filesize;
+        out->ret = (int32_t) ret;
+        
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
     }
-    
-    out->filesize = (hg_size_t) filesize;
-    out->ret = (int32_t) ret;
-    
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_fsync_rpc(client_rpc_req_t* creq)
@@ -489,10 +499,11 @@ void process_client_fsync_rpc(client_rpc_req_t* creq)
     LOGINFO("syncing gfid=%d", gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
-    ret = unifyfs_fops_fsync(&ctx, gfid, creq);
+    ret = unifyfs_fops_fsync(&ctx, gfid);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("unifyfs_fops_fsync() failed");
         out->ret = (int32_t) ret;
@@ -540,7 +551,6 @@ void process_client_mread_rpc(client_rpc_req_t* creq)
 
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
-    
 }
 
 void process_client_truncate_rpc(client_rpc_req_t* creq)
@@ -557,19 +567,22 @@ void process_client_truncate_rpc(client_rpc_req_t* creq)
     LOGDBG("setting file size for gfid=%d to sz=%zu", gfid, filesize);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
     ret = unifyfs_fops_truncate(&ctx, gfid, filesize);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("unifyfs_fops_truncate() failed");
+    if (ret != UNIFYFS_PENDING) {
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGERR("unifyfs_fops_truncate() failed");
+        }
+
+        out->ret = (int32_t) ret;
+
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
     }
-
-    out->ret = (int32_t) ret;
-
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_laminate_rpc(client_rpc_req_t* creq)
@@ -585,19 +598,22 @@ void process_client_laminate_rpc(client_rpc_req_t* creq)
     LOGDBG("laminating gfid=%d", gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
     ret = unifyfs_fops_laminate(&ctx, gfid);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("unifyfs_fops_laminate() failed");
+    if (ret != UNIFYFS_PENDING) {
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGERR("unifyfs_fops_laminate() failed");
+        }
+
+        out->ret = (int32_t) ret;
+
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
     }
-
-    out->ret = (int32_t) ret;
-
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_unlink_rpc(client_rpc_req_t* creq)
@@ -613,8 +629,9 @@ void process_client_unlink_rpc(client_rpc_req_t* creq)
     LOGDBG("unlinking gfid=%d", gfid);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
     ret = unifyfs_fops_unlink(&ctx, gfid);
     if (ret != UNIFYFS_SUCCESS) {
@@ -646,19 +663,22 @@ void process_client_transfer_rpc(client_rpc_req_t* creq)
     LOGDBG("transferring gfid=%d to file %s", gfid, dest_file);
 
     unifyfs_fops_ctx_t ctx = {
-        .app_id    = in->app_id,
-        .client_id = in->client_id,
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
     };
     ret = unifyfs_fops_transfer(&ctx, transfer_id, gfid, mode, dest_file);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("unifyfs_fops_transfer() failed");
+    if (ret != UNIFYFS_PENDING) {
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGERR("unifyfs_fops_transfer() failed");
+        }
+
+        out->ret = (int32_t) ret;
+
+        /* send rpc response and cleanup request state */
+        sync_respond_client(creq, rpc_name);
     }
-
-    out->ret = (int32_t) ret;
-
-    /* send rpc response and cleanup request state */
-    sync_respond_client(creq, rpc_name);
-    
+    // else, some other thread will respond when pending req finishes
 }
 
 void process_client_gfids_rpc(client_rpc_req_t* creq)
