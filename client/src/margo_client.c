@@ -56,6 +56,7 @@ static void register_client_rpcs(client_rpc_context_t* ctx)
     CLIENT_REGISTER_RPC(laminate);
     CLIENT_REGISTER_RPC(fsync);
     CLIENT_REGISTER_RPC(mread);
+    CLIENT_REGISTER_RPC(read_extent);
     CLIENT_REGISTER_RPC(node_local_extents_get);
     CLIENT_REGISTER_RPC(get_gfids);
 
@@ -796,6 +797,71 @@ int invoke_client_sync_rpc(unifyfs_client* client,
     return ret;
 }
 
+/* invokes the client read rpc function */
+int invoke_client_read_extent_rpc(unifyfs_client* client,
+                                  unifyfs_extent_t* extent,
+                                  void* readbuf,
+                                  size_t* bytes_read,
+                                  size_t* cover_begin_offset,
+                                  size_t* cover_end_offset)
+{
+    /* check that we have initialized margo */
+    if (NULL == client_rpc_context) {
+        return UNIFYFS_FAILURE;
+    }
+
+    *bytes_read = 0;
+
+    const char* rpc_name = "unifyfs_read_extent";
+    unifyfs_read_extent_in_t in;
+    unifyfs_read_extent_out_t out;
+    rpc_state* rpc =
+        create_rpc_request(client_rpc_context->rpcs.read_extent_id,
+                           client_rpc_context->mid,
+                           client_rpc_context->svr_addr,
+                           (void*)&in, 0,
+                           (void*)&out, 0);
+    if (NULL == rpc) {
+        LOGERR("failed to create %s rpc request", rpc_name);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* initialize bulk handle for user buf */
+    hg_return_t hret = margo_bulk_create(rpc->mid,
+                                         1, &(readbuf), &(extent->length),
+                                         HG_BULK_WRITE_ONLY,
+                                         &(in.bulk_extent));
+    if (hret != HG_SUCCESS) {
+        LOGERR("failed to create bulk for %s rpc request - %s",
+               rpc_name, HG_Error_to_string(hret));
+        cleanup_rpc_state(rpc);
+        return UNIFYFS_ERROR_MARGO;
+    }
+
+    /* set input parameters */
+    in.app_id    = (int32_t) client->state.app_id;
+    in.client_id = (int32_t) client->state.client_id;
+    in.extent    = *extent;
+    
+    /* call rpc function */
+    int ret;
+    int rc = sync_call_server(rpc, rpc_name);
+    if (rc == UNIFYFS_SUCCESS) {
+        LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
+        ret = (int) out.ret;
+        *bytes_read = (size_t) out.bytes_read;
+        *cover_begin_offset = (size_t) out.coverage_begin;
+        *cover_end_offset = (size_t) out.coverage_end;
+    } else {
+        ret = rc;
+    }
+
+    margo_bulk_free(in.bulk_extent);
+    cleanup_rpc_state(rpc);
+
+    return ret;
+}
+
 /* invokes the client mread rpc function */
 int invoke_client_mread_rpc(unifyfs_client* client,
                             unsigned int reqid,
@@ -858,9 +924,9 @@ int invoke_client_mread_rpc(unifyfs_client* client,
 /* invokes the client metaget rpc function */
 int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
                                              int num_req,
-                                             extents_list_t* read_req,
-                                             size_t* extent_count,
-                                             unifyfs_chunk_index_t** extents)
+                                             chunk_list_t* read_req,
+                                             size_t* chunk_count,
+                                             unifyfs_data_chunk_t** chunks)
 {
     /* check that we have initialized margo */
     if (NULL == client_rpc_context) {
@@ -874,12 +940,12 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
     }
 
     unifyfs_extent_t* int_extents = (unifyfs_extent_t*)buffer;
-    extents_list_t* cur = read_req;
+    chunk_list_t* cur = read_req;
     for (int i = 0; i < num_req; i++) {
         unifyfs_extent_t* ext = int_extents + i;
-        ext->gfid = cur->value.gfid;
-        ext->offset = cur->value.file_pos;
-        ext->length = cur->value.length;
+        ext->gfid = cur->chunk.gfid;
+        ext->offset = cur->chunk.file_offset;
+        ext->length = cur->chunk.length;
         cur = cur->next;
     }
 
@@ -921,10 +987,10 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
         LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int) UNIFYFS_SUCCESS) {
-            *extent_count = out.extent_count;
+            *chunk_count = out.chunk_count;
             void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_data,
                                                out.bulk_size, NULL);
-            *extents = (unifyfs_chunk_index_t*) out_buffer;
+            *chunks = (unifyfs_data_chunk_t*) out_buffer;
         }
     } else {
         ret = rc;
@@ -1059,6 +1125,7 @@ static void unifyfs_mread_req_data_rpc(hg_handle_t handle)
                                                              client_mread);
         if (NULL == mread) {
             /* unknown client request */
+            LOGERR("no matching status found for mread=%d", client_mread);
             ret = EINVAL;
         } else {
             int read_index = (int) in.read_index;
@@ -1178,6 +1245,7 @@ static void unifyfs_mread_req_complete_rpc(hg_handle_t handle)
                                                              client_mread);
         if (NULL == mread) {
             /* unknown client request */
+            LOGERR("no matching status found for mread=%d", client_mread);
             ret = EINVAL;
         } else {
             int read_index = (int) in.read_index;
@@ -1234,6 +1302,7 @@ static void unifyfs_transfer_complete_rpc(hg_handle_t handle)
         client = unifyfs_find_client(client_app, client_id, NULL);
         if (NULL == client) {
             /* unknown client */
+            LOGERR("no matching status found for transfer=%d", transfer_id);
             ret = EINVAL;
         } else {
             /* Update the transfer state */
@@ -1281,6 +1350,8 @@ static void unifyfs_unlink_callback_rpc(hg_handle_t handle)
         client = unifyfs_find_client(client_app, client_id, NULL);
         if (NULL == client) {
             /* unknown client */
+            LOGERR("no matching client found [%d:%d]",
+                   client_app, client_id);
             ret = EINVAL;
         } else {
             int gfid = (int) in.gfid;

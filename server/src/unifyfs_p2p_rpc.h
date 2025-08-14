@@ -69,6 +69,22 @@ int clear_pending_remote_request(p2p_request* preq);
 /*** Point-to-point Server RPCs ***/
 
 /**
+ * @brief Read a chunk from remote server
+ *
+ * @param chunk        remote chunk data location descriptor
+ * @param bulk_offset  offset with bulk_extent to write data
+ * @param bulk_extent  bulk representing local buffer
+ *
+ * @param[out] bytes_read  number of chunk bytes read
+ *
+ * @return success|failure
+ */
+int unifyfs_invoke_read_chunk_rpc(unifyfs_data_chunk_t* chunk,
+                                  size_t bulk_offset,
+                                  hg_bulk_t bulk_extent,
+                                  size_t* bytes_read);
+
+/**
  * @brief Request chunk reads from remote server
  *
  * @param dst_srvr_rank  remote server rank
@@ -118,7 +134,7 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
                                     unsigned int num_extents,
                                     unifyfs_extent_t* extents,
                                     unsigned int* num_chunks,
-                                    chunk_read_req_t** chunks);
+                                    unifyfs_data_chunk_t** chunks);
 
 /**
  * @brief Laminate the target file
@@ -135,7 +151,7 @@ int unifyfs_invoke_laminate_rpc(unifyfs_fops_ctx_t* ctx,
  *
  * @param gfid    target file
  * @param create  flag indicating if this is a newly created file
- * @param attr    file attributes to update
+ * @param attrs   file attributes to update
  *
  * @return success|failure
  */
@@ -148,7 +164,7 @@ int unifyfs_invoke_metaget_rpc(unifyfs_fops_ctx_t* ctx,
  *
  * @param gfid     target file
  * @param attr_op  metadata operation that triggered update
- * @param attr     file attributes to update
+ * @param attrs    file attributes to update
  *
  * @return success|failure
  */

@@ -43,6 +43,7 @@ typedef enum {
     UNIFYFS_SERVER_RPC_LAMINATE,
     UNIFYFS_SERVER_RPC_METAGET,
     UNIFYFS_SERVER_RPC_METASET,
+    UNIFYFS_SERVER_RPC_READ_CHUNK,
     UNIFYFS_SERVER_RPC_SERVER_PID,
     UNIFYFS_SERVER_RPC_TRANSFER,
     UNIFYFS_SERVER_RPC_TRUNCATE,
@@ -82,14 +83,14 @@ DECLARE_MARGO_RPC_HANDLER(server_pid_rpc)
 
 /* Chunk read request */
 
-MERCURY_GEN_PROC(read_extent_chunks_in_t,
-                 ((unifyfs_extent_t)(extent))
-                 ((hg_bulk_t)(bulk_extent))
-                 ((hg_bulk_t)(bulk_chunks)))
-MERCURY_GEN_PROC(read_extent_chunks_out_t,
+MERCURY_GEN_PROC(read_chunk_in_t,
+                 ((unifyfs_data_chunk_t)(chunk))
+                 ((hg_size_t)(bulk_offset))
+                 ((hg_bulk_t)(bulk_handle)))
+MERCURY_GEN_PROC(read_chunk_out_t,
                  ((int32_t)(ret))
-                 ((hg_size_t)(total_read)))
-DECLARE_MARGO_RPC_HANDLER(read_extent_chunks_rpc)
+                 ((hg_size_t)(bytes_read)))
+DECLARE_MARGO_RPC_HANDLER(read_chunk_rpc)
 
 MERCURY_GEN_PROC(chunk_read_request_in_t,
                  ((int32_t)(src_rank))

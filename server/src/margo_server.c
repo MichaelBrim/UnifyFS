@@ -197,6 +197,11 @@ static void register_server_server_rpcs(margo_instance_id mid)
             metaset_in_t, metaset_out_t, metaset_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
+    unifyfsd_rpc_context->rpcs.read_chunk_id =
+        MARGO_REGISTER_PROVIDER(mid, "read_chunk_rpc",
+            read_chunk_in_t, read_chunk_out_t, read_chunk_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
+
     unifyfsd_rpc_context->rpcs.server_pid_id =
         MARGO_REGISTER_PROVIDER(mid, "server_pid_rpc",
             server_pid_in_t, server_pid_out_t, server_pid_rpc,
@@ -330,6 +335,10 @@ static void register_client_server_rpcs(margo_instance_id mid)
     MARGO_REGISTER(mid, "unifyfs_mread_rpc",
                    unifyfs_mread_in_t, unifyfs_mread_out_t,
                    unifyfs_mread_rpc);
+
+    MARGO_REGISTER(mid, "unifyfs_read_extent_rpc",
+                   unifyfs_read_extent_in_t, unifyfs_read_extent_out_t,
+                   unifyfs_read_extent_rpc);
 
     MARGO_REGISTER(mid, "unifyfs_node_local_extents_get_rpc",
                    unifyfs_node_local_extents_get_in_t,

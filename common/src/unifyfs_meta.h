@@ -66,27 +66,39 @@ typedef struct {
     int gfid;       /* global file id */
 } unifyfs_index_t;
 
+/* data chunk write-log location descriptor */
 typedef struct {
-    off_t file_pos; /* start offset of chunk data in file */
-    off_t log_pos;  /* start offset of chunk data in write log */
-    size_t length;  /* length of data */
-    int gfid;       /* global file id */
-    int log_app_id; /* app id associated with log */
-    int log_client_id; /* client id associated with log */
-} unifyfs_chunk_index_t;
+    size_t file_offset; /* start offset of data chunk in file */
+    size_t log_offset;  /* start offset of data chunk in write log */
+    size_t length;      /* length of data chunk */
+    int gfid;           /* global file id */
+    int log_app_id;     /* app id associated with write log */
+    int log_client_id;  /* client id associated with write log */
+    int log_server;     /* rank of server holding write log data */
+} unifyfs_data_chunk_t;
+
+#define debug_print_chunk(chkptr) \
+do { \
+    unifyfs_data_chunk_t* _chk = (chkptr); \
+    LOGDBG("data_chunk(%p) - gfid=%d, offset=%zu, nbytes=%zu @ " \
+           "server[%d] log(app=%d, client=%d, offset=%zu)", \
+           _chk, _chk->gfid, _chk->file_offset, _chk->length, \
+           _chk->log_server, _chk->log_app_id, _chk->log_client_id, \
+           _chk->log_offset); \
+} while (0)
 
 /* array list for dynamic extents for read requests*/
-typedef struct extents_list {
-    unifyfs_chunk_index_t value;
-    struct extents_list* next;
-} extents_list_t;
+typedef struct chunk_list {
+    unifyfs_data_chunk_t chunk;
+    struct chunk_list* next;
+} chunk_list_t;
 
 typedef struct {
-    size_t  index_size;    /* size of index metadata region in bytes */
-    size_t  index_offset;  /* superblock offset of index metadata region */
+    size_t index_size;   /* size of index metadata region in bytes */
+    size_t index_offset; /* superblock offset of index metadata region */
 
-    size_t* ptr_num_entries;         /* pointer to number of index entries */
-    unifyfs_index_t* index_entries;  /* pointer to first unifyfs_index_t */
+    size_t* ptr_num_entries;        /* pointer to number of index entries */
+    unifyfs_index_t* index_entries; /* pointer to first unifyfs_index_t */
 } unifyfs_write_index;
 
 /* UnifyFS file attributes */

@@ -55,7 +55,8 @@ client_mread_status* client_create_mread_request(unifyfs_client* client,
     int active_count = arraylist_size(client->active_mreads);
     if (active_count == arraylist_capacity(client->active_mreads)) {
         /* already at full capacity for outstanding reads */
-        LOGWARN("too many outstanding client reads");
+        LOGERR("cannot create new mread status due to capacity - %d active",
+               active_count);
         pthread_mutex_unlock(&(client->sync));
         return NULL;
     }
@@ -292,7 +293,7 @@ void update_read_req_coverage(read_req_t* req,
 
 
 /* This uses information in the extent map for a file on the client to
- * complete any read requests.  It only complets a request if it contains
+ * complete any read requests.  It only completes a request if it contains
  * all of the data.  Otherwise the request is copied to the list of
  * requests to be handled by the server. */
 static
@@ -574,6 +575,62 @@ static void update_read_req_result(unifyfs_client* client,
 }
 
 /**
+ * Service a single client read requests using either
+ * local data or forwarding requests to the server.
+ *
+ * @param req  the read request
+ *
+ * @return error code
+ */
+int process_gfid_read(unifyfs_client* client,
+                      read_req_t* req)
+{
+    /* assume we'll succeed */
+    int ret = UNIFYFS_SUCCESS;
+
+    /* mark request as in-progress */
+    req->errcode = EINPROGRESS;
+
+    int fid = unifyfs_fid_from_gfid(client, req->gfid);
+    unifyfs_filemeta_t* meta = unifyfs_get_meta_from_fid(client, fid);
+    if (meta != NULL) {
+        /* attempt to complete requests locally if enabled */
+        if (client->use_local_extents || client->use_node_local_extents) {
+            // MJB TODO - handle client-local and node-local reads
+        }
+    }
+
+    LOGDBG("read req(%p): fid=%d, gfid=%d, offset=%zu, len=%zu",
+           req, fid, req->gfid, req->offset, req->length);
+
+    /* invoke read rpc on server */
+    unifyfs_extent_t ext;
+    ext.gfid   = req->gfid;
+    ext.length = req->length;
+    ext.offset = req->offset;
+    size_t nread = 0;
+    size_t cover_begin_offset = (size_t) -1;
+    size_t cover_end_offset   = (size_t) -1;
+    int read_rc = invoke_client_read_extent_rpc(client, &ext, req->buf,
+                                                &nread,
+                                                &cover_begin_offset,
+                                                &cover_end_offset);
+    if (read_rc != UNIFYFS_SUCCESS) {
+        LOGDBG("read_extent rpc to server failed (rc=%d)", read_rc);
+        req->errcode = read_rc;
+        if (read_rc != ENODATA) {
+            ret = read_rc;
+        }
+    } else {
+        req->nread = nread;
+        req->cover_begin_offset = cover_begin_offset;
+        req->cover_end_offset = cover_end_offset;
+    }
+    update_read_req_result(client, req);
+    return ret;
+}
+
+/**
  * Service a list of client read requests using either local
  * data or forwarding requests to the server.
  *
@@ -621,28 +678,30 @@ int process_gfid_reads(unifyfs_client* client,
     /* this records the pointer to the temp request array if
      * we allocate one, we should free this later if not NULL */
     read_req_t* reqs = NULL;
+    
     if (client->use_node_local_extents) {
-        extents_list_t* list = calloc(1, sizeof(extents_list_t));
-        extents_list_t* cur = list;
+        int fid, rc;
+        unifyfs_filemeta_t* meta;
+        chunk_list_t* list = calloc(1, sizeof(chunk_list_t));
+        chunk_list_t* cur = list;
         int num_request_selected = 0;
         for (int i = 0; i < in_count; ++i) {
-            int fid = unifyfs_fid_from_gfid(client, in_reqs[i].gfid);
-            /* get meta for this file id */
-            unifyfs_filemeta_t* meta = unifyfs_get_meta_from_fid(client, fid);
+            fid = unifyfs_fid_from_gfid(client, in_reqs[i].gfid);
+            meta = unifyfs_get_meta_from_fid(client, fid);
             if (meta != NULL) {
                 if (!meta->attrs.is_laminated || !meta->needs_reads_sync) {
-                    /* do not proceed for this request as
+                    /* do not proceed for this request as it is not laminated
                      * it is not a laminated file or has already been synced.*/
                     continue;
                 }
                 num_request_selected++;
                 off_t filesize_offt = unifyfs_gfid_filesize(client,
                                                             in_reqs[i].gfid);
-                cur->value.file_pos = 0;
-                cur->value.length = filesize_offt - 1;
-                cur->value.gfid = in_reqs[i].gfid;
+                cur->chunk.file_offset = 0;
+                cur->chunk.length = filesize_offt - 1;
+                cur->chunk.gfid = in_reqs[i].gfid;
                 if (i < in_count - 1) {
-                    cur->next = calloc(1, sizeof(extents_list_t));
+                    cur->next = calloc(1, sizeof(chunk_list_t));
                     cur->next->next = NULL;
                     cur = cur->next;
                 } else {
@@ -653,38 +712,31 @@ int process_gfid_reads(unifyfs_client* client,
         }
         if (num_request_selected > 0) {
             /* There are files which are laminated and
-             * require sync of extents */
-            size_t extent_count = 0;
-            unifyfs_chunk_index_t* extents = NULL;
-            int rc =
-                  invoke_client_node_local_extents_get_rpc(client,
-                                                           num_request_selected,
-                                                           list,
-                                                           &extent_count,
-                                                           &extents);
-            if (rc == UNIFYFS_SUCCESS && extent_count != 0) {
-                for (int j = 0; j < extent_count; ++j) {
-                    if (extents[j].log_app_id ==
-                        client->state.app_id) {
-                        int fid = unifyfs_fid_from_gfid(client,
-                                                        extents[j].gfid);
-                        /* get meta for this file id */
-                        unifyfs_filemeta_t* meta = unifyfs_get_meta_from_fid(
-                                client,
-                                fid);
+             * require reverse sync of local extents */
+            size_t chunk_count = 0;
+            unifyfs_data_chunk_t* chunks = NULL;
+            rc = invoke_client_node_local_extents_get_rpc(client,
+                                                          num_request_selected,
+                                                          list,
+                                                          &chunk_count,
+                                                          &chunks);
+            if ((rc == UNIFYFS_SUCCESS) && (chunk_count != 0)) {
+                for (int j = 0; j < chunk_count; ++j) {
+                    if (chunks[j].log_app_id == client->state.app_id) {
+                        fid = unifyfs_fid_from_gfid(client, chunks[j].gfid);
+                        meta = unifyfs_get_meta_from_fid(client, fid);
                         if (meta != NULL) {
-                            seg_tree_add(&meta->extents,
-                                         extents[j].file_pos,
-                                         extents[j].file_pos +
-                                         extents[j].length - 1,
-                                         extents[j].log_pos,
-                                         extents[j].log_client_id);
+                            unsigned long start = chunks[j].file_offset;
+                            unsigned long end = start + chunks[j].length - 1;
+                            unsigned long pos = chunks[j].log_offset;
+                            seg_tree_add(&meta->extents, start, end, pos,
+                                         chunks[j].log_client_id);
                         }
                     }
                 }
             }
-            if (extents != NULL) {
-                free(extents);
+            if (chunks != NULL) {
+                free(chunks);
             }
         }
     }

@@ -239,7 +239,7 @@ int rpc_unlink(unifyfs_fops_ctx_t* ctx,
 
 static
 int create_remote_read_requests(unsigned int n_chunks,
-                                chunk_read_req_t* chunks,
+                                unifyfs_data_chunk_t* chunks,
                                 unsigned int* outlen,
                                 server_chunk_reads_t** out)
 {
@@ -248,12 +248,12 @@ int create_remote_read_requests(unsigned int n_chunks,
     unsigned int i = 0;
     server_chunk_reads_t* remote_reads = NULL;
     server_chunk_reads_t* current = NULL;
-    chunk_read_req_t* pos = NULL;
+    unifyfs_data_chunk_t* chk = NULL;
 
     /* count how many servers we need to contact */
     for (i = 0; i < n_chunks; i++) {
-        chunk_read_req_t* curr_chunk = &chunks[i];
-        int curr_rank = curr_chunk->rank;
+        unifyfs_data_chunk_t* curr_chunk = &chunks[i];
+        int curr_rank = curr_chunk->log_server;
         if (curr_rank != prev_rank) {
             num_server_reads++;
         }
@@ -268,24 +268,24 @@ int create_remote_read_requests(unsigned int n_chunks,
         return ENOMEM;
     }
 
-    pos = chunks;
+    chk = chunks;
     unsigned int processed = 0;
 
     LOGDBG("preparing remote read request for %u chunks (%d servers)",
            n_chunks, num_server_reads);
 
     for (i = 0; i < num_server_reads; i++) {
-        int rank = pos->rank;
+        int rank = chk->log_server;
 
         current = &remote_reads[i];
         current->rank = rank;
-        current->reqs = pos;
+        current->reqs = chk;
 
-        for ( ; processed < n_chunks; pos++) {
-            if (pos->rank != rank) {
+        for ( ; processed < n_chunks; chk++) {
+            if (chk->log_server != rank) {
                 break;
             }
-            current->total_sz += pos->nbytes;
+            current->total_sz += chk->length;
             current->num_chunks++;
             processed++;
         }
@@ -332,7 +332,7 @@ int submit_read_request(unifyfs_fops_ctx_t* ctx,
     for ( ; extent_ndx < count; extent_ndx++) {
         unifyfs_extent_t* ext = extents + extent_ndx;
         unsigned int n_chunks = 0;
-        chunk_read_req_t* chunks = NULL;
+        unifyfs_data_chunk_t* chunks = NULL;
         int rc = unifyfs_invoke_find_extents_rpc(ext->gfid, 1, ext,
                                                  &n_chunks, &chunks);
         if (rc) {
@@ -380,14 +380,96 @@ static
 int rpc_read(unifyfs_fops_ctx_t* ctx,
              int gfid,
              off_t offset,
-             size_t length)
+             size_t length,
+             void* buf,
+             size_t* bytes_read,
+             size_t* cover_begin_offset,
+             size_t* cover_end_offset)
 {
-    unifyfs_extent_t extent = { 0 };
-    extent.gfid = gfid;
-    extent.offset = (unsigned long) offset;
-    extent.length = (unsigned long) length;
+    int ret = UNIFYFS_SUCCESS;
 
-    return submit_read_request(ctx, 1, &extent);
+    unifyfs_extent_t ext = {
+        .gfid  = gfid,
+        .offset = offset,
+        .length = length
+    };
+    size_t extent_end_byte = offset + length - 1;
+    
+    /* get array of data chunks for target file extent */
+    unsigned int n_chunks = 0;
+    unifyfs_data_chunk_t* chunks = NULL;
+    int rc = unifyfs_invoke_find_extents_rpc(gfid, 1, &ext,
+                                             &n_chunks, &chunks);
+    if (rc) {
+        LOGERR("failed to find extent chunk locations");
+        return rc;
+    }
+
+    size_t coverage_begin = (size_t) -1;
+    size_t coverage_end   = (size_t) -1;
+    
+    if (n_chunks > 0) {
+        /* register local destination buffer for bulk access from other servers */
+        hg_bulk_t bulk_local;
+        hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid,
+                                             1, &buf, &length,
+                                             HG_BULK_WRITE_ONLY, &bulk_local);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_bulk_create() failed - %s",
+                   HG_Error_to_string(hret));
+            return UNIFYFS_ERROR_MARGO;
+        }
+    
+        for (unsigned int i=0; i < n_chunks; i++) {
+            unifyfs_data_chunk_t* chk = chunks + i;
+            size_t chk_offset = chk->file_offset - offset;
+            size_t chk_end_byte = chk->file_offset + chk->length - 1;
+            if (chk_end_byte > extent_end_byte) {
+                /* adjust chunk read size to avoid extent overrun */
+                size_t overrun = chk_end_byte - extent_end_byte;
+                chk->length -= overrun;
+            }
+            size_t nread = 0;
+            if (chk->log_server == glb_pmi_rank) {
+                char* chk_buf = (char*)buf + chk_offset;
+                rc = sm_read_chunk(chk, chk_buf, &nread);
+            } else {
+                rc = unifyfs_invoke_read_chunk_rpc(chk, chk_offset,
+                                                   bulk_local, &nread);
+            }
+            if (rc == UNIFYFS_SUCCESS) {
+                if ((coverage_begin == (size_t)-1) ||
+                    (chk_offset < coverage_begin)) {
+                    coverage_begin = chk_offset;
+                }
+                if ((coverage_end == (size_t)-1) ||
+                    ((chk_offset + nread - 1) > coverage_end)) {
+                    coverage_end = chk_offset + nread - 1;
+                }
+            } else {
+                ret = rc;
+                break;
+            }
+        }
+
+        /* deregister our bulk buffer */
+        margo_bulk_free(bulk_local);
+    }
+
+    if (ret == UNIFYFS_SUCCESS) {
+        size_t total_bytes_read = (coverage_end - coverage_begin) + 1;
+        if (NULL != bytes_read) {
+            *bytes_read = total_bytes_read;
+        }
+        if (NULL != cover_begin_offset) {
+            *cover_begin_offset = coverage_begin;
+        }
+        if (NULL != cover_end_offset) {
+            *cover_end_offset = coverage_end;
+        }
+    }
+
+    return ret;
 }
 
 static

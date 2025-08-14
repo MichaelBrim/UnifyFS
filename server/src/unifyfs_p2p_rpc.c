@@ -389,7 +389,7 @@ int invoke_chunk_read_request_rpc(int dst_srvr_rank,
 
     int ret = UNIFYFS_SUCCESS;
     hg_return_t hret;
-    hg_size_t bulk_sz = (hg_size_t)num_chunks * sizeof(chunk_read_req_t);
+    hg_size_t bulk_sz = (hg_size_t)num_chunks * sizeof(unifyfs_data_chunk_t);
 
     /* forward request to file owner */
     p2p_request preq;
@@ -801,7 +801,7 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
                                     unsigned int num_extents,
                                     unifyfs_extent_t* extents,
                                     unsigned int* num_chunks,
-                                    chunk_read_req_t** chunks)
+                                    unifyfs_data_chunk_t** chunks)
 {
     if ((NULL == num_chunks) || (NULL == chunks)) {
         return EINVAL;
@@ -897,7 +897,7 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
         unsigned int n_chks = (unsigned int) out->num_locations;
         if (n_chks > 0) {
             /* get bulk buffer with chunk locations */
-            buf_sz = (size_t)n_chks * sizeof(chunk_read_req_t);
+            buf_sz = (size_t)n_chks * sizeof(unifyfs_data_chunk_t);
             buf = pull_margo_bulk(preq.req_state->handle, out->locations,
                                   buf_sz, NULL);
             if (NULL == buf) {
@@ -907,7 +907,7 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
                 /* lookup requested extents */
                 LOGDBG("received %u chunk locations for gfid=%d",
                        n_chks, gfid);
-                *chunks = (chunk_read_req_t*) buf;
+                *chunks = (unifyfs_data_chunk_t*) buf;
                 *num_chunks = (unsigned int) n_chks;
             }
         }
@@ -948,7 +948,7 @@ static void process_find_extents_rpc(server_rpc_req_t* sreq)
         /* find chunks for given extents */
         int full_coverage = 0;
         
-        chunk_read_req_t* chunk_locs = NULL;
+        unifyfs_data_chunk_t* chunk_locs = NULL;
         ret = sm_find_extents(gfid, num_extents, extents,
                               &num_chunks, &chunk_locs, &full_coverage);
         if (ret == UNIFYFS_SUCCESS) {
@@ -959,7 +959,7 @@ static void process_find_extents_rpc(server_rpc_req_t* sreq)
                 assert(mid != MARGO_INSTANCE_NULL);
 
                 void* buf = (void*) chunk_locs;
-                size_t buf_sz = (size_t)num_chunks * sizeof(chunk_read_req_t);
+                size_t buf_sz = (size_t)num_chunks * sizeof(unifyfs_data_chunk_t);
                 hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
                                                      HG_BULK_READ_ONLY,
                                                      &bulk_resp_handle);
@@ -1368,6 +1368,119 @@ static void laminate_rpc(hg_handle_t handle)
     process_laminate_rpc(sreq);
 }
 DEFINE_MARGO_RPC_HANDLER(laminate_rpc)
+
+
+/*************************************************************************
+ * Read a remote chunk into local extent buffer at given offset
+ *************************************************************************/
+
+/* Read a remote chunk */
+int unifyfs_invoke_read_chunk_rpc(unifyfs_data_chunk_t* chunk,
+                                  size_t bulk_offset,
+                                  hg_bulk_t bulk_extent,
+                                  size_t* bytes_read)
+{
+    /* forward request to file owner */
+    p2p_request preq;
+    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_READ_CHUNK,
+                              chunk->log_server, chunk->gfid, &preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        return rc;
+    }
+    assert(preq.req_state != NULL);
+    read_chunk_in_t*  in  = preq.req_state->inputs;
+    read_chunk_out_t* out = preq.req_state->outputs;
+
+    /* fill rpc input struct and forward request */
+    in->chunk       = *chunk;
+    in->bulk_offset = (hg_size_t) bulk_offset;
+    in->bulk_handle = bulk_extent;
+    rc = forward_p2p_request(&preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        cleanup_p2p_request(&preq);
+        return rc;
+    }
+
+    /* wait for request completion */
+    rc = wait_for_p2p_request(&preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        cleanup_p2p_request(&preq);
+        return rc;
+    }
+
+    /* get the result of the rpc */
+    int ret = (int) out->ret;
+    if (NULL != bytes_read) {
+        *bytes_read = out->bytes_read;
+    }
+    cleanup_p2p_request(&preq);
+
+    return ret;
+}
+
+static void process_read_chunk_rpc(server_rpc_req_t* sreq)
+{
+    const char* rpc_name = "read_chunk";
+    read_chunk_in_t* in = sreq->req_state->inputs;
+    read_chunk_out_t* out = sreq->req_state->outputs;
+    assert((in != NULL) && (out != NULL));
+
+    size_t nbytes = 0;
+    unifyfs_data_chunk_t* chunk = &(in->chunk);
+
+    int rc;
+    void* readbuf = calloc(1, chunk->length);
+    if (NULL == readbuf) {
+        LOGERR("failed to allocate local read buffer");
+        rc = ENOMEM;
+    } else {
+        rc = sm_read_chunk(chunk, readbuf, &nbytes);
+        if (rc == UNIFYFS_SUCCESS) {
+            /* push data into remote bulk buffer */
+            rc = push_margo_bulk(sreq->req_state->handle,
+                                 in->bulk_handle,
+                                 in->bulk_offset,
+                                 (hg_size_t) nbytes,
+                                 readbuf);
+            if (rc != UNIFYFS_SUCCESS) {
+                LOGERR("failed to push chunk data to remote bulk (nbytes=%zu)",
+                       nbytes);
+                nbytes = 0;
+            }
+        }
+        free(readbuf);
+    }
+
+    out->ret = (int32_t) rc;
+    out->bytes_read = (hg_size_t) nbytes;
+
+    /* send rpc response and cleanup request state */
+    sync_respond_server(sreq, rpc_name);
+}
+
+/* read chunk rpc handler */
+static void read_chunk_rpc(hg_handle_t handle)
+{
+    LOGDBG("read_chunk rpc handler");
+
+    /* create client rpc state */
+    server_rpc_req_t* sreq =
+        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_READ_CHUNK, handle,
+                                  sizeof(read_chunk_in_t),
+                                  sizeof(read_chunk_out_t));
+    if (NULL == sreq) {
+        read_chunk_out_t out;
+        out.ret = (int32_t) ENOMEM;
+        out.bytes_read = 0;
+        hg_return_t hret = margo_respond(handle, &out);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
+        }
+        return;
+    }
+    process_read_chunk_rpc(sreq);
+}
+DEFINE_MARGO_RPC_HANDLER(read_chunk_rpc)
 
 
 /*************************************************************************

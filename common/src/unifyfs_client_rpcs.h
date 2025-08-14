@@ -41,7 +41,8 @@ typedef enum {
     UNIFYFS_CLIENT_RPC_METAGET,
     UNIFYFS_CLIENT_RPC_METASET,
     UNIFYFS_CLIENT_RPC_MOUNT,
-    UNIFYFS_CLIENT_RPC_READ,
+    UNIFYFS_CLIENT_RPC_MREAD,
+    UNIFYFS_CLIENT_RPC_READ_EXTENT,
     UNIFYFS_CLIENT_RPC_SYNC,
     UNIFYFS_CLIENT_RPC_TRANSFER,
     UNIFYFS_CLIENT_RPC_TRUNCATE,
@@ -244,10 +245,10 @@ MERCURY_GEN_PROC(unifyfs_laminate_out_t,
                  ((int32_t)(ret)))
 DECLARE_MARGO_RPC_HANDLER(unifyfs_laminate_rpc)
 
-/* unifyfs_read_rpc (client => server)
+/* unifyfs_read_extent_rpc (client => server)
  *
- * read the target unifyfs_extent_t into the bulk corresponding to user
- * buffer */
+ * read the target unifyfs_extent_t into the bulk corresponding to
+ * the user buffer */
 
 MERCURY_GEN_PROC(unifyfs_read_extent_in_t,
                  ((int32_t)(app_id))
@@ -256,7 +257,9 @@ MERCURY_GEN_PROC(unifyfs_read_extent_in_t,
                  ((hg_bulk_t)(bulk_extent)))
 MERCURY_GEN_PROC(unifyfs_read_extent_out_t,
                  ((int32_t)(ret))
-                 ((hg_size_t)(bytes_read)))
+                 ((hg_size_t)(bytes_read))
+                 ((hg_size_t)(coverage_begin))
+                 ((hg_size_t)(coverage_end)))
 DECLARE_MARGO_RPC_HANDLER(unifyfs_read_extent_rpc)
 
 
@@ -331,7 +334,7 @@ MERCURY_GEN_PROC(unifyfs_node_local_extents_get_in_t,
                  ((hg_size_t)(bulk_size)))
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_out_t,
                  ((int32_t)(ret))
-                 ((hg_size_t)(extent_count))
+                 ((hg_size_t)(chunk_count))
                  ((hg_bulk_t)(bulk_data))
                  ((hg_size_t)(bulk_size)))
 DECLARE_MARGO_RPC_HANDLER(unifyfs_node_local_extents_get_rpc)

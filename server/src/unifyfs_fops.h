@@ -52,7 +52,11 @@ typedef int (*unifyfs_fops_mread_t)(unifyfs_fops_ctx_t* ctx,
                                     size_t n_req, void* req);
 
 typedef int (*unifyfs_fops_read_t)(unifyfs_fops_ctx_t* ctx,
-                                   int gfid, off_t offset, size_t len);
+                                   int gfid, off_t offset,
+                                   size_t len, void* buf,
+                                   size_t* nread,
+                                   size_t* coverage_begin_offset,
+                                   size_t* coverage_end_offset);
 
 
 typedef int (*unifyfs_fops_transfer_t)(unifyfs_fops_ctx_t* ctx,
@@ -173,7 +177,13 @@ static inline int unifyfs_fops_mread(unifyfs_fops_ctx_t* ctx,
 }
 
 static inline int unifyfs_fops_read(unifyfs_fops_ctx_t* ctx,
-                                    int gfid, off_t offset, size_t len)
+                                    int gfid,
+                                    off_t offset,
+                                    size_t len,
+                                    void* buf,
+                                    size_t* bytes_read,
+                                    size_t* cover_begin_offset,
+                                    size_t* cover_end_offset)
 {
     if (!global_fops_tab->read) {
         return ENOSYS;
@@ -181,7 +191,8 @@ static inline int unifyfs_fops_read(unifyfs_fops_ctx_t* ctx,
 
     LOGDBG("redirecting fops_read (fops_tab: %s)", global_fops_tab->name);
 
-    return global_fops_tab->read(ctx, gfid, offset, len);
+    return global_fops_tab->read(ctx, gfid, offset, len, buf, bytes_read,
+                                 cover_begin_offset, cover_end_offset);
 }
 
 static inline int unifyfs_fops_transfer(unifyfs_fops_ctx_t* ctx,

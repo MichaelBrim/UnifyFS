@@ -1256,7 +1256,7 @@ int unifyfs_fd_read(int fd, off_t pos, void* buf, size_t count, size_t* nread)
     req.cover_end_offset   = (size_t)-1;
 
     /* execute read operation */
-    int ret = process_gfid_reads(posix_client, &req, 1);
+    int ret = process_gfid_read(posix_client, &req);
     if (ret != UNIFYFS_SUCCESS) {
         /* failed to issue read operation */
         return ret;
@@ -2114,7 +2114,7 @@ ssize_t UNIFYFS_WRAP(pread)(int fd, void* buf, size_t count, off_t offset)
 
         /* execute read operation */
         ssize_t retcount;
-        int ret = process_gfid_reads(posix_client, &req, 1);
+        int ret = process_gfid_read(posix_client, &req);
         if (ret != UNIFYFS_SUCCESS) {
             /* error reading data */
             errno = unifyfs_rc_errno(ret);

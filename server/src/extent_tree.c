@@ -550,7 +550,7 @@ static void chunk_req_from_extent(
     unsigned long req_offset,
     unsigned long req_len,
     struct extent_tree_node* n,
-    chunk_read_req_t* chunk)
+    unifyfs_data_chunk_t* chunk)
 {
     unsigned long offset     = n->extent.start;
     unsigned long nbytes     = n->extent.end - n->extent.start + 1;
@@ -570,10 +570,10 @@ static void chunk_req_from_extent(
         nbytes -= diff;
     }
 
-    chunk->offset        = offset;
-    chunk->nbytes        = nbytes;
+    chunk->file_offset   = offset;
+    chunk->length        = nbytes;
     chunk->log_offset    = log_offset;
-    chunk->rank          = n->extent.svr_rank;
+    chunk->log_server    = n->extent.svr_rank;
     chunk->log_client_id = n->extent.cli_id;
     chunk->log_app_id    = n->extent.app_id;
 }
@@ -583,7 +583,7 @@ int extent_tree_get_chunk_list(
     unsigned long offset,      /* starting logical offset */
     unsigned long len,         /* length of extent */
     unsigned int* n_chunks,    /* [out] number of chunks returned */
-    chunk_read_req_t** chunks, /* [out] chunk array */
+    unifyfs_data_chunk_t** chunks, /* [out] chunk array */
     int* extent_covered)       /* [out] set=1 if extent fully covered */
 {
     int ret = 0;
@@ -592,8 +592,8 @@ int extent_tree_get_chunk_list(
     struct extent_tree_node* first = NULL;
     struct extent_tree_node* last = NULL;
     struct extent_tree_node* next = NULL;
-    chunk_read_req_t* out_chunks = NULL;
-    chunk_read_req_t* current = NULL;
+    unifyfs_data_chunk_t* out_chunks = NULL;
+    unifyfs_data_chunk_t* current = NULL;
     unsigned long prev_end = 0;
     bool gap_found = false;
 

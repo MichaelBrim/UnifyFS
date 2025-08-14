@@ -72,4 +72,14 @@ MERCURY_GEN_STRUCT_PROC(unifyfs_extent_t,
     ((hg_size_t)(length))
     ((int32_t)(gfid)))
 
+    /* encode/decode unifyfs_extent_t */
+MERCURY_GEN_STRUCT_PROC(unifyfs_data_chunk_t,
+    ((hg_size_t)(file_offset))
+    ((hg_size_t)(log_offset))
+    ((hg_size_t)(length))
+    ((int32_t)(gfid))
+    ((int32_t)(log_app_id))
+    ((int32_t)(log_client_id))
+    ((int32_t)(log_server)))
+
 #endif /* __UNIFYFS_RPC_TYPES_H */

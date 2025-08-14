@@ -19,9 +19,11 @@
  * margo_client.h - client-server margo RPCs
  ********************************************/
 
+#include <margo.h>
+
 #include "unifyfs_api_internal.h"
 #include "unifyfs_client_rpcs.h"
-#include <margo.h>
+
 
 typedef struct ClientRpcIds {
     /* client-to-server */
@@ -37,6 +39,7 @@ typedef struct ClientRpcIds {
     hg_id_t laminate_id;
     hg_id_t fsync_id;
     hg_id_t mread_id;
+    hg_id_t read_extent_id;
     hg_id_t node_local_extents_get_id;
     hg_id_t get_gfids_id;
 
@@ -91,6 +94,13 @@ int invoke_client_mread_rpc(unifyfs_client* client,
                             size_t extents_size,
                             void* extents_buffer);
 
+int invoke_client_read_extent_rpc(unifyfs_client* client,
+                                  unifyfs_extent_t* extent,
+                                  void* readbuf,
+                                  size_t* bytes_read,
+                                  size_t* cover_begin_offset,
+                                  size_t* cover_end_offset);
+
 int invoke_client_sync_rpc(unifyfs_client* client,
                            int gfid);
 
@@ -107,12 +117,11 @@ int invoke_client_truncate_rpc(unifyfs_client* client,
 int invoke_client_unlink_rpc(unifyfs_client* client,
                              int gfid);
 
-
 int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
                                              int num_req,
-                                             extents_list_t* read_req,
+                                             chunk_list_t* read_req,
                                              size_t* extent_count,
-                                             unifyfs_chunk_index_t** extents);
+                                             unifyfs_data_chunk_t** extents);
 
 int invoke_client_get_gfids_rpc(unifyfs_client* client,
                                 int* num_gfids,

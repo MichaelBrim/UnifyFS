@@ -113,4 +113,8 @@ int process_gfid_reads(unifyfs_client* client,
                        read_req_t* in_reqs,
                        size_t in_count);
 
+/* process a single client read request */
+int process_gfid_read(unifyfs_client* client,
+                      read_req_t* in_req);
+
 #endif // UNIFYFS_CLIENT_READ_H

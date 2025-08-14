@@ -98,14 +98,15 @@ typedef enum {
     READREQ_COMPLETE,          /* all reads completed */
 } readreq_status_e;
 
+#if 0 // MJB DEPRECATED - unifyfs_data_chunk_t replaces chunk_read_req_t
 typedef struct {
-    int gfid;           /* gfid */
     size_t nbytes;      /* size of data chunk */
-    size_t offset;      /* file offset */
-    size_t log_offset;  /* remote log offset */
-    int log_app_id;     /* remote log application id */
-    int log_client_id;  /* remote log client id */
-    int rank;           /* remote server rank who holds data */
+    size_t file_offset; /* file offset */
+    size_t log_offset;  /* write log offset */
+    int log_app_id;     /* write log application id */
+    int log_client_id;  /* write log client id */
+    int log_server;     /* server rank holding write log */
+    int gfid;           /* gfid */
 } chunk_read_req_t;
 
 #define debug_print_chunk_read_req(reqptr) \
@@ -113,9 +114,11 @@ do { \
     chunk_read_req_t* _req = (reqptr); \
     LOGDBG("chunk_read_req(%p) - gfid=%d, offset=%zu, nbytes=%zu @ " \
            "server[%d] log(app=%d, client=%d, offset=%zu)", \
-           _req, _req->gfid, _req->offset, _req->nbytes, _req->rank, \
+           _req, _req->gfid, _req->file_offset, _req->nbytes, \
+           _req->log_server, \
            _req->log_app_id, _req->log_client_id, _req->log_offset); \
 } while (0)
+ #endif
 
 typedef struct {
     int gfid;         /* gfid */
@@ -132,8 +135,8 @@ typedef struct {
     int num_chunks;          /* number of chunk requests/responses */
     readreq_status_e status; /* summary status for chunk reads */
     size_t total_sz;         /* total size of data requested */
-    chunk_read_req_t* reqs;  /* @RM: subarray of server_read_req_t.chunks
-                              * @SM: received requests buffer */
+    unifyfs_data_chunk_t* reqs; /* @RM: subarray of server_read_req_t.chunks
+                                 * @SM: received requests buffer */
     chunk_read_resp_t* resp; /* @RM: received responses buffer
                               * @SM: allocated responses buffer */
 } server_chunk_reads_t;

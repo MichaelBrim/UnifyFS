@@ -565,7 +565,7 @@ int unifyfs_inode_get_extents(int gfid,
 
 int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                                     unsigned int* n_chunks,
-                                    chunk_read_req_t** chunks,
+                                    unifyfs_data_chunk_t** chunks,
                                     int* full_coverage)
 {
     int ret = UNIFYFS_SUCCESS;
@@ -612,17 +612,17 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
 static
 int compare_chunk_read_reqs(const void* _c1, const void* _c2)
 {
-    chunk_read_req_t* c1 = (chunk_read_req_t*) _c1;
-    chunk_read_req_t* c2 = (chunk_read_req_t*) _c2;
+    unifyfs_data_chunk_t* c1 = (unifyfs_data_chunk_t*) _c1;
+    unifyfs_data_chunk_t* c2 = (unifyfs_data_chunk_t*) _c2;
 
-    if (c1->rank > c2->rank) {
+    if (c1->log_server > c2->log_server) {
         return 1;
-    } else if (c1->rank < c2->rank) {
+    } else if (c1->log_server < c2->log_server) {
         return -1;
     } else {
-        if (c1->offset > c2->offset) {
+        if (c1->file_offset > c2->file_offset) {
             return 1;
-        } else if (c1->offset < c2->offset) {
+        } else if (c1->file_offset < c2->file_offset) {
             return -1;
         }
         return 0;
@@ -633,7 +633,7 @@ int compare_chunk_read_reqs(const void* _c1, const void* _c2)
 int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
                                         unifyfs_extent_t* extents,
                                         unsigned int* n_locs,
-                                        chunk_read_req_t** chunklocs,
+                                        unifyfs_data_chunk_t** chunklocs,
                                         int* full_coverage)
 {
     int ret = UNIFYFS_SUCCESS;
@@ -641,9 +641,9 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
     unsigned int i = 0;
     unsigned int j = 0;
     unsigned int n_chunks = 0;
-    chunk_read_req_t* chunks = NULL;
+    unifyfs_data_chunk_t* chunks = NULL;
     unsigned int* n_resolved = NULL;
-    chunk_read_req_t** resolved = NULL;
+    unifyfs_data_chunk_t** resolved = NULL;
 
     /* set default output parameter values */
     *n_locs = 0;
@@ -658,7 +658,7 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
     }
 
     n_resolved = (unsigned int*) buf;
-    resolved = (chunk_read_req_t**) &n_resolved[n_extents];
+    resolved = (unifyfs_data_chunk_t**) &n_resolved[n_extents];
 
     /* resolve chunks addresses for all requests from inode tree */
     for (i = 0; i < n_extents; i++) {
@@ -694,11 +694,11 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
             goto out_fail;
         }
 
-        chunk_read_req_t* pos = chunks;
+        unifyfs_data_chunk_t* pos = chunks;
         for (i = 0; i < n_extents; i++) {
-            chunk_read_req_t* ext_chunks = resolved[i];
+            unifyfs_data_chunk_t* ext_chunks = resolved[i];
             for (j = 0; j < n_resolved[i]; j++) {
-                //debug_print_chunk_read_req(ext_chunks + j);
+                //debug_print_chunk(ext_chunks + j);
                 *pos = ext_chunks[j];
                 pos++;
             }
@@ -711,9 +711,9 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
             /* sort the requests based on server rank */
             qsort(chunks, n_chunks, sizeof(*chunks), compare_chunk_read_reqs);
         }
-        chunk_read_req_t* chk = chunks;
+        unifyfs_data_chunk_t* chk = chunks;
         for (i = 0; i < n_chunks; i++, chk++) {
-            debug_print_chunk_read_req(chk);
+            debug_print_chunk(chk);
         }
     }
 

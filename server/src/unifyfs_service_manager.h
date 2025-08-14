@@ -58,6 +58,11 @@ int sm_submit_transfer_request(transfer_thread_args* tta);
 /* tell service manager thread transfer has completed */
 int sm_complete_transfer_request(transfer_thread_args* tta);
 
+/* read the given chunk into provided buffer */
+int sm_read_chunk(unifyfs_data_chunk_t* chunk,
+                  void* buffer,
+                  size_t* bytes_read);
+
 /* decode and issue chunk reads contained in message buffer */
 int sm_issue_chunk_reads(int src_rank,
                          int src_app_id,
@@ -89,7 +94,7 @@ int sm_find_extents(int gfid,
                     size_t num_extents,
                     unifyfs_extent_t* extents,
                     unsigned int* out_num_chunks,
-                    chunk_read_req_t** out_chunks,
+                    unifyfs_data_chunk_t** out_chunks,
                     int* full_coverage);
 
 int sm_transfer(int client_server,

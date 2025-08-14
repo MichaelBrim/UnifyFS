@@ -527,3 +527,71 @@ void* pull_margo_bulk(hg_handle_t rpc_hdl,
     }
 }
 
+/* push data from local buffer to remote bulk */
+int push_margo_bulk(hg_handle_t rpc_hdl,
+                    hg_bulk_t bulk_remote,
+                    hg_size_t bulk_out_offset,
+                    hg_size_t buf_sz,
+                    void* local_buf)
+{
+    if (0 == buf_sz) {
+        return UNIFYFS_SUCCESS;
+    }
+
+    if (NULL == local_buf) {
+        return EINVAL;
+    }
+
+    /* get mercury info to set up bulk transfer */
+    const struct hg_info* hgi = margo_get_info(rpc_hdl);
+    assert(hgi);
+    margo_instance_id mid = margo_hg_handle_get_instance(rpc_hdl);
+    assert(mid != MARGO_INSTANCE_NULL);
+
+    /* register local source buffer for bulk access */
+    hg_bulk_t bulk_local;
+    hg_return_t hret = margo_bulk_create(mid, 1, &local_buf, &buf_sz,
+                                         HG_BULK_READ_ONLY, &bulk_local);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_bulk_create() failed - %s",
+               HG_Error_to_string(hret));
+        return UNIFYFS_ERROR_MARGO;
+    }
+    
+    /* execute the transfer to push data from local buffer
+     * into remote buffer.
+     *
+     * NOTE: mercury/margo bulk transfer does not check the maximum
+     * transfer size that the underlying transport supports, and a
+     * large bulk transfer may result in failure. */
+    int i = 0;
+    hg_size_t max_bulk = UNIFYFS_SERVER_MAX_BULK_TX_SIZE;
+    hg_size_t remain = buf_sz;
+    do {
+        hg_size_t buf_offset = i * max_bulk;
+        hg_size_t len = (remain < max_bulk) ? remain : max_bulk;
+        hret = margo_bulk_transfer(mid, HG_BULK_PUSH, hgi->addr,
+                                   bulk_remote, bulk_out_offset + buf_offset,
+                                   bulk_local, buf_offset, len);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_bulk_transfer(buf_offset=%zu, len=%zu) failed - %s",
+                   (size_t)buf_offset, (size_t)len, HG_Error_to_string(hret));
+            break;
+        }
+        remain -= len;
+        i++;
+    } while (remain > 0);
+
+    if (hret == HG_SUCCESS) {
+        LOGDBG("successful bulk transfer (%zu bytes)", buf_sz);
+        
+        /* deregister our bulk transfer buffer */
+        margo_bulk_free(bulk_local);
+    } else {
+        LOGERR("failed bulk transfer (transferred %zu of %zu bytes) - %s",
+               (buf_sz - remain), buf_sz, HG_Error_to_string(hret));
+        return UNIFYFS_ERROR_MARGO;
+    }
+
+    return UNIFYFS_SUCCESS;
+}

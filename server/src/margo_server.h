@@ -40,12 +40,13 @@ typedef struct ServerRpcIds {
     hg_id_t extent_add_id;
     hg_id_t extent_bcast_id;
     hg_id_t extent_lookup_id;
+    hg_id_t fileattr_bcast_id;
     hg_id_t filesize_id;
     hg_id_t laminate_id;
     hg_id_t laminate_bcast_id;
     hg_id_t metaget_id;
     hg_id_t metaset_id;
-    hg_id_t fileattr_bcast_id;
+    hg_id_t read_chunk_id;
     hg_id_t server_pid_id;
     hg_id_t transfer_id;
     hg_id_t transfer_bcast_id;

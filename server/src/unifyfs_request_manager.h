@@ -50,7 +50,7 @@ typedef struct {
     int client_mread;          /* client mread id */
     int client_read_ndx;       /* client mread request index */
     int num_server_reads;      /* size of remote_reads array */
-    chunk_read_req_t* chunks;  /* array of chunk-reads */
+    unifyfs_data_chunk_t* chunks;  /* array of chunks to read */
     server_chunk_reads_t* remote_reads; /* per-server remote reads array */
     unifyfs_extent_t extent;   /* the requested extent */
 } server_read_req_t;

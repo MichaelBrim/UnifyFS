@@ -275,6 +275,51 @@ int svcmgr_fini(void)
     return UNIFYFS_SUCCESS;
 }
 
+int sm_read_chunk(unifyfs_data_chunk_t* chunk,
+                  void* buffer,
+                  size_t* bytes_read)
+{
+    if ((NULL == chunk) || (NULL == buffer) || (NULL == bytes_read)) {
+        LOGERR("one or more arguments are NULL");
+        return EINVAL;
+    }
+
+    int ret = UNIFYFS_SUCCESS;
+
+    debug_print_chunk(chunk);
+
+    /* get size and log offset of data we are to read */
+    size_t nbytes = chunk->length;
+    size_t log_off = chunk->log_offset;
+
+    /* read data from client log */
+    int app_id = chunk->log_app_id;
+    int cli_id = chunk->log_client_id;
+    app_client* app_clnt = get_app_client(app_id, cli_id);
+    if (NULL != app_clnt) {
+        logio_context* logio_ctx = app_clnt->state.logio_ctx;
+        if (NULL != logio_ctx) {
+            size_t nread = 0;
+            int rc = unifyfs_logio_read(logio_ctx, log_off, nbytes,
+                                        buffer, &nread);
+            if (UNIFYFS_SUCCESS == rc) {
+                *bytes_read = nread;
+            } else {
+                ret = rc;
+            }
+        } else {
+            LOGERR("app client [%d:%d] has NULL logio context",
+                   app_id, cli_id);
+            ret = UNIFYFS_FAILURE;
+        }
+    } else {
+        LOGERR("failed to get application client [%d:%d] state",
+               app_id, cli_id);
+        ret = UNIFYFS_FAILURE;
+    }
+    return ret;
+}
+
 /* Decode and issue chunk-reads received from request manager.
  * We get a list of read requests for data on our node.  Read
  * data for each request and construct a set of read replies
@@ -296,8 +341,8 @@ int sm_issue_chunk_reads(int src_rank,
                          size_t total_data_sz,
                          char* msg_buf)
 {
-    /* get pointer to read request array */
-    chunk_read_req_t* reqs = (chunk_read_req_t*)msg_buf;
+    /* get pointer to chunk read request array */
+    unifyfs_data_chunk_t* reqs = (unifyfs_data_chunk_t*)msg_buf;
 
     /* we'll allocate a buffer to hold a list of chunk read response
      * structures, one for each chunk, followed by a data buffer
@@ -346,53 +391,33 @@ int sm_issue_chunk_reads(int src_rank,
      * data for next read */
     size_t buf_cursor = 0;
 
-    int i;
-    app_client* app_clnt = NULL;
-    for (i = 0; i < num_chks; i++) {
+    int rc;
+    for (int i = 0; i < num_chks; i++) {
         /* pointer to next read request */
-        chunk_read_req_t* rreq = reqs + i;
-        debug_print_chunk_read_req(rreq);
+        unifyfs_data_chunk_t* chk = reqs + i;
 
         /* pointer to next read response */
         chunk_read_resp_t* rresp = resp + i;
 
-        /* get size and log offset of data we are to read */
-        size_t nbytes = rreq->nbytes;
-        size_t log_offset = rreq->log_offset;
+        /* get size of data we are to read */
+        size_t nbytes = chk->length;
 
         /* record request metadata in response */
-        rresp->gfid    = rreq->gfid;
+        rresp->gfid    = chk->gfid;
         rresp->read_rc = 0;
         rresp->nbytes  = nbytes;
-        rresp->offset  = rreq->offset;
+        rresp->offset  = chk->file_offset;
 
         /* get pointer to next position in buffer to store read data */
         char* buf_ptr = databuf + buf_cursor;
 
         /* read data from client log */
-        int app_id = rreq->log_app_id;
-        int cli_id = rreq->log_client_id;
-        app_clnt = get_app_client(app_id, cli_id);
-        if (NULL != app_clnt) {
-            logio_context* logio_ctx = app_clnt->state.logio_ctx;
-            if (NULL != logio_ctx) {
-                size_t nread = 0;
-                int rc = unifyfs_logio_read(logio_ctx, log_offset, nbytes,
-                                            buf_ptr, &nread);
-                if (UNIFYFS_SUCCESS == rc) {
-                    rresp->read_rc = nread;
-                } else {
-                    rresp->read_rc = (ssize_t)(-rc);
-                }
-            } else {
-                LOGERR("app client [%d:%d] has NULL logio context",
-                       app_id, cli_id);
-                rresp->read_rc = (ssize_t)(-EINVAL);
-            }
+        size_t nread = 0;
+        rc = sm_read_chunk(chk, (void*)buf_ptr, &nread);
+        if (UNIFYFS_SUCCESS == rc) {
+            rresp->read_rc = nread;
         } else {
-            LOGERR("failed to get application client [%d:%d] state",
-                   app_id, cli_id);
-            rresp->read_rc = (ssize_t)(-EINVAL);
+            rresp->read_rc = (ssize_t)(-rc);
         }
 
         /* update to point to next slot in read reply buffer */
@@ -416,9 +441,9 @@ int sm_issue_chunk_reads(int src_rank,
     } else {
         /* response is for myself, post it directly */
         LOGDBG("responding to myself");
-        int rc = rm_post_chunk_read_responses(src_app_id, src_client_id,
-                                              src_rank, src_req_id,
-                                              num_chks, buf_sz, crbuf);
+        rc = rm_post_chunk_read_responses(src_app_id, src_client_id,
+                                          src_rank, src_req_id,
+                                          num_chks, buf_sz, crbuf);
         if (rc != UNIFYFS_SUCCESS) {
             LOGERR("failed to handle chunk read responses");
         }
@@ -526,7 +551,7 @@ int sm_find_extents(int gfid,
                     size_t num_extents,
                     unifyfs_extent_t* extents,
                     unsigned int* out_num_chunks,
-                    chunk_read_req_t** out_chunks,
+                    unifyfs_data_chunk_t** out_chunks,
                     int* full_coverage)
 {
     /* do local inode metadata lookup */

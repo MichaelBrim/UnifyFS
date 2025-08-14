@@ -74,6 +74,14 @@ void* pull_margo_bulk(hg_handle_t rpc_hdl,
                       hg_size_t bulk_sz,
                       hg_bulk_t* local_bulk);
 
+/* push data from local buffer to offset within passed bulk handle.
+ * returns buffer, or NULL on failure. */
+int push_margo_bulk(hg_handle_t rpc_hdl,
+                    hg_bulk_t bulk_out,
+                    hg_size_t bulk_out_offset,
+                    hg_size_t buf_sz,
+                    void* local_buf);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif

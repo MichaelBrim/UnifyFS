@@ -154,7 +154,7 @@ int extent_tree_get_chunk_list(
     unsigned long offset,      /* starting logical offset */
     unsigned long len,         /* length of extent */
     unsigned int* n_chunks,    /* [out] number of chunks returned */
-    chunk_read_req_t** chunks, /* [out] chunk array */
+    unifyfs_data_chunk_t** chunks, /* [out] chunk array */
     int* extent_covered);      /* [out] set=1 if extent fully covered */
 
 /* dump method for debugging extent trees */

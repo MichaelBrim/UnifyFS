@@ -212,7 +212,7 @@ int unifyfs_inode_laminate(int gfid);
  */
 int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                                     unsigned int* n_chunks,
-                                    chunk_read_req_t** chunks,
+                                    unifyfs_data_chunk_t** chunks,
                                     int* full_coverage);
 
 /**
@@ -230,7 +230,7 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
 int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
                                         unifyfs_extent_t* extents,
                                         unsigned int* n_locs,
-                                        chunk_read_req_t** chunklocs,
+                                        unifyfs_data_chunk_t** chunklocs,
                                         int* full_coverage);
 
 /**
