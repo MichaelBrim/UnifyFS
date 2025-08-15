@@ -144,12 +144,10 @@ typedef struct unifyfs_file_status {
 } unifyfs_file_status;
 
 /* File metadata from the server side */
-// TODO: Should we merge this with unifyfs_file_status above?
 typedef struct unifyfs_server_file_meta {
     char* filename;  // Note: this pointer will be malloc'd by whoever fills
-                     // in the data for this struct.  It is the responsibility
-                     // of the user to free the pointer once its no longer
-                     // needed!
+                     // in the data for this struct. Free the pointer when
+                     // no longer needed!
     int gfid;
 
     /* Set when the file is laminated */
@@ -395,10 +393,6 @@ unifyfs_rc unifyfs_get_gfid_list(unifyfs_handle fshdl,
 
 
 /* Get metadata for a specific gfid from the server */
-/* Note: This function differs from unifyfs_stat() above in that this function
- * goes directly to the server and doesn't bother checking for anything that
- * the client side knows about the file.
- */
 unifyfs_rc unifyfs_get_server_file_meta(unifyfs_handle fshdl,
                                         unifyfs_gfid gfid,
                                         unifyfs_server_file_meta* fmeta);

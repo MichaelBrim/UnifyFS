@@ -300,8 +300,8 @@ unifyfs_rc unifyfs_get_server_file_meta(unifyfs_handle fshdl,
 
     int ret = unifyfs_get_global_file_meta(client, gfid, &gfattr);
     if (UNIFYFS_SUCCESS == ret) {
-        // Copy the fields from gfattr over to fmeta
-        // This is basically a 1-to-1 copy becaue unifyfs_server_file_meta
+        // Copy the fields from gfattr over to fmeta.
+        // This is basically a 1-to-1 copy because unifyfs_server_file_meta
         // is just a public-facing version of unifyfs_file_attr_t.  We don't
         // want to memcpy(), though, in case the structs ever do diverge.
         fmeta->filename     = gfattr.filename;

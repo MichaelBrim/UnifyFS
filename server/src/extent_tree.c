@@ -549,12 +549,12 @@ unsigned long extent_tree_max_offset(struct extent_tree* tree)
 static void chunk_req_from_extent(
     unsigned long req_offset,
     unsigned long req_len,
-    struct extent_tree_node* n,
+    extent_metadata* extent,
     unifyfs_data_chunk_t* chunk)
 {
-    unsigned long offset     = n->extent.start;
-    unsigned long nbytes     = n->extent.end - n->extent.start + 1;
-    unsigned long log_offset = n->extent.log_pos;
+    unsigned long offset     = extent->start;
+    unsigned long nbytes     = extent->end - extent->start + 1;
+    unsigned long log_offset = extent->log_pos;
     unsigned long last       = req_offset + req_len - 1;
 
     unsigned long diff;
@@ -565,26 +565,26 @@ static void chunk_req_from_extent(
         nbytes -= diff;
     }
 
-    if (n->extent.end > last) {
-        diff = n->extent.end - last;
+    if (extent->end > last) {
+        diff = extent->end - last;
         nbytes -= diff;
     }
 
     chunk->file_offset   = offset;
     chunk->length        = nbytes;
     chunk->log_offset    = log_offset;
-    chunk->log_server    = n->extent.svr_rank;
-    chunk->log_client_id = n->extent.cli_id;
-    chunk->log_app_id    = n->extent.app_id;
+    chunk->log_server    = extent->svr_rank;
+    chunk->log_client_id = extent->cli_id;
+    chunk->log_app_id    = extent->app_id;
 }
 
 int extent_tree_get_chunk_list(
-    struct extent_tree* tree,  /* extent tree to search */
-    unsigned long offset,      /* starting logical offset */
-    unsigned long len,         /* length of extent */
-    unsigned int* n_chunks,    /* [out] number of chunks returned */
+    struct extent_tree* tree,      /* extent tree to search */
+    unsigned long offset,          /* starting logical offset */
+    unsigned long len,             /* length of extent */
+    unsigned int* n_chunks,        /* [out] number of chunks returned */
     unifyfs_data_chunk_t** chunks, /* [out] chunk array */
-    int* extent_covered)       /* [out] set=1 if extent fully covered */
+    int* extent_covered)           /* [out] set=1 if extent fully covered */
 {
     int ret = 0;
     unsigned int count = 0;
@@ -593,7 +593,7 @@ int extent_tree_get_chunk_list(
     struct extent_tree_node* last = NULL;
     struct extent_tree_node* next = NULL;
     unifyfs_data_chunk_t* out_chunks = NULL;
-    unifyfs_data_chunk_t* current = NULL;
+    unifyfs_data_chunk_t* chunk = NULL;
     unsigned long prev_end = 0;
     bool gap_found = false;
 
@@ -639,14 +639,14 @@ int extent_tree_get_chunk_list(
     }
 
     next = first;
-    current = out_chunks;
+    chunk = out_chunks;
     while ((NULL != next) && (next->extent.start <= end)) {
         /* trim out the extent so it does not include the data that is not
          * requested */
-        chunk_req_from_extent(offset, len, next, current);
+        chunk_req_from_extent(offset, len, &(next->extent), chunk);
 
         next = extent_tree_iter(tree, next);
-        current += 1;
+        chunk += 1;
     }
 
     *chunks = out_chunks;

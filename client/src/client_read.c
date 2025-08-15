@@ -291,13 +291,149 @@ void update_read_req_coverage(read_req_t* req,
     }
 }
 
+static
+logio_context* get_client_logio(unifyfs_client* client,
+                                int target_client_id)
+{
+    /* we need to use the logio_ctx from correct client */
+    logio_context* target_ctx = NULL;
+    if (target_client_id == client->state.client_id) {
+        target_ctx = client->state.logio_ctx;
+    } else if (client->logio_ctx_ptrs[target_client_id] != NULL) {
+        target_ctx = client->logio_ctx_ptrs[target_client_id];
+    } else {
+        /* init logio context for another client using my settings */
+        size_t shmem_size = 0;
+        if (client->state.logio_ctx->shmem != NULL) {
+            shmem_size = client->state.logio_ctx->shmem->size;
+        }
+        size_t spill_size = client->state.logio_ctx->spill_sz;
+        char* spill_dir = NULL;
+        if (spill_size > 0) {
+            spill_dir = client->cfg.logio_spill_dir;
+        }
+        logio_context* new_ctx = NULL;
+        int rc = unifyfs_logio_init(client->state.app_id, target_client_id,
+                                    shmem_size, spill_size, spill_dir,
+                                    &new_ctx);
+        if (rc == UNIFYFS_SUCCESS) {
+            client->logio_ctx_ptrs[target_client_id] = new_ctx;
+            target_ctx = new_ctx;
+        }
+    }
+    return target_ctx;
+}
+
+/* Uses information in the extent map for a file on the client to
+ * complete a read request. Only completes a request if there are no
+ * gaps in the data. */
+static
+int service_local_read(unifyfs_client* client,
+                       read_req_t* req)
+{
+    /* lookup local extents if we have them */
+    int fid = unifyfs_fid_from_gfid(client, req->gfid);
+    if (fid < 0) {
+        return UNIFYFS_FAILURE;
+    }
+    unifyfs_filemeta_t* meta = unifyfs_get_meta_from_fid(client, fid);
+    assert(meta != NULL);
+
+    /* start and end offset of this request */
+    size_t req_start = req->offset;
+    size_t req_end   = req->offset + req->length;
+
+    /* this variable tracks the offset of the next byte we need */
+    size_t expected_start = req_start;
+
+    /* iterate over extents we have for this file,
+     * and check that there are no holes in coverage */
+    
+    struct seg_tree* extents = &(meta->extents);
+    struct seg_tree_node* begin;
+    struct seg_tree_node* next;
+
+    seg_tree_rdlock(extents);
+
+    /* search for a starting extent using a range of just first byte */
+    begin = seg_tree_find_nolock(extents, req_start, req_start);
+    next = begin;
+    while ((next != NULL) && (next->start < req_end)) {
+        if (expected_start >= next->start) {
+            /* this extent has the next byte we expect,
+             * bump up to the first byte past the end
+             * of this extent */
+            expected_start = next->end + 1;
+        } else {
+            /* there is a gap between extents so we're missing
+             * some bytes */
+            seg_tree_unlock(extents);
+            return UNIFYFS_FAILURE;
+        }
+
+        /* get the next element in the tree */
+        next = seg_tree_iter(extents, next);
+    }
+
+    /* check that we have the last byte */
+    if (expected_start < req_end) {
+        /* missing some bytes at the end of the request */
+        seg_tree_unlock(extents);
+        return UNIFYFS_FAILURE;
+    }
+
+    /* otherwise we can copy the data locally, iterate
+     * over the extents and copy data into request buffer.
+     * again search for a starting extent using a range
+     * of just the very first byte that we need */
+    next = begin;
+    while ((next != NULL) && (next->start < req_end)) {
+        /* get start and length of this extent */
+        size_t ext_start = next->start;
+        size_t ext_length = (next->end + 1) - ext_start;
+
+        /* get the offset into the log */
+        size_t ext_log_pos = next->ptr;
+
+        /* get number of bytes from start of extent and request
+         * buffers to the start of the overlap region */
+        size_t ext_byte_offset, req_byte_offset, cover_length;
+        char* req_ptr = get_extent_coverage(req, ext_start, ext_length,
+                                            &req_byte_offset,
+                                            &ext_byte_offset,
+                                            &cover_length);
+        assert(req_ptr != NULL);
+
+        /* copy data from local write log into user buffer */
+        off_t log_offset = ext_log_pos + ext_byte_offset;
+        size_t nread = 0;
+        logio_context* logio_ctx = get_client_logio(client, next->client_id);
+        if (NULL != logio_ctx) {
+            int rc = unifyfs_logio_read(logio_ctx, log_offset,
+                                        cover_length, req_ptr, &nread);
+            if (rc == UNIFYFS_SUCCESS) {
+                /* update bytes we have filled in the request buffer */
+                update_read_req_coverage(req, req_byte_offset, nread);
+            } else {
+                LOGERR("local log read failed for offset=%zu size=%zu",
+                       (size_t) log_offset, cover_length);
+                req->errcode = rc;
+            }
+        }
+        /* get the next element in the tree */
+        next = seg_tree_iter(extents, next);
+    }
+
+    seg_tree_unlock(extents);
+    return UNIFYFS_SUCCESS;
+}
 
 /* This uses information in the extent map for a file on the client to
  * complete any read requests.  It only completes a request if it contains
  * all of the data.  Otherwise the request is copied to the list of
  * requests to be handled by the server. */
 static
-void service_local_reqs(
+void service_local_read_requests(
     unifyfs_client* client,
     read_req_t* read_reqs,   /* list of input read requests */
     int count,               /* number of input read requests */
@@ -305,166 +441,25 @@ void service_local_reqs(
     read_req_t* server_reqs, /* output list of requests to forward to server */
     int* out_count)          /* number of items copied to server list */
 {
-    /* this will track the total number of requests we're passing
-     * on to the server */
+    /* these track the total number of requests we're locally processing
+     * or passing on to the server */
     int local_count  = 0;
     int server_count = 0;
 
-    /* iterate over each input read request, satisfy it locally if we can
-     * otherwise copy request into output list that the server will handle
-     * for us */
-    int i;
-    for (i = 0; i < count; i++) {
-        /* get current read request */
-        read_req_t* req = &read_reqs[i];
-        int gfid = req->gfid;
-
-        /* lookup local extents if we have them */
-        int fid = unifyfs_fid_from_gfid(client, gfid);
-
-        /* move to next request if we can't find the matching fid */
-        if (fid < 0) {
-            /* copy current request into list of requests
-             * that we'll ask server for */
+    /* iterate over each read request, and service it locally if we can.
+     * otherwise, copy request into list that the server will handle */
+    for (int i = 0; i < count; i++) {
+        read_req_t* req = read_reqs + i;
+        int rc = service_local_read(client, req);
+        if (rc == UNIFYFS_SUCCESS) {
+            /* copy request data to list we completed locally */
+            memcpy(&local_reqs[local_count], req, sizeof(read_req_t));
+            local_count++;
+        } else {
+            /* copy current request into list of server requests */
             memcpy(&server_reqs[server_count], req, sizeof(read_req_t));
             server_count++;
-            continue;
         }
-
-        /* start and length of this request */
-        size_t req_start = req->offset;
-        size_t req_end   = req->offset + req->length;
-
-        /* get pointer to extents for this file */
-        unifyfs_filemeta_t* meta = unifyfs_get_meta_from_fid(client, fid);
-        assert(meta != NULL);
-        struct seg_tree* extents = &meta->extents;
-
-        /* lock the extent tree for reading */
-        seg_tree_rdlock(extents);
-
-        /* can we fully satisfy this request? assume we can */
-        int have_local = 1;
-
-        /* this will point to the offset of the next byte we
-         * need to account for */
-        size_t expected_start = req_start;
-
-        /* iterate over extents we have for this file,
-         * and check that there are no holes in coverage.
-         * we search for a starting extent using a range
-         * of just the very first byte that we need */
-        struct seg_tree_node* first;
-        first = seg_tree_find_nolock(extents, req_start, req_start);
-        struct seg_tree_node* next = first;
-        while (next != NULL && next->start < req_end) {
-            if (expected_start >= next->start) {
-                /* this extent has the next byte we expect,
-                 * bump up to the first byte past the end
-                 * of this extent */
-                expected_start = next->end + 1;
-            } else {
-                /* there is a gap between extents so we're missing
-                 * some bytes */
-                have_local = 0;
-                break;
-            }
-
-            /* get the next element in the tree */
-            next = seg_tree_iter(extents, next);
-        }
-
-        /* check that we account for the full request
-         * up until the last byte */
-        if (expected_start < req_end) {
-            /* missing some bytes at the end of the request */
-            have_local = 0;
-        }
-
-        /* if we can't fully satisfy the request, copy request to
-         * output array, so it can be passed on to server */
-        if (!have_local) {
-            /* copy current request into list of requests
-             * that we'll ask server for */
-            memcpy(&server_reqs[server_count], req, sizeof(read_req_t));
-            server_count++;
-
-            /* release lock before we go to next request */
-            seg_tree_unlock(extents);
-
-            continue;
-        }
-
-        /* otherwise we can copy the data locally, iterate
-         * over the extents and copy data into request buffer.
-         * again search for a starting extent using a range
-         * of just the very first byte that we need */
-        next = first;
-        while ((next != NULL) && (next->start < req_end)) {
-            /* get start and length of this extent */
-            size_t ext_start = next->start;
-            size_t ext_length = (next->end + 1) - ext_start;
-
-            /* get the offset into the log */
-            size_t ext_log_pos = next->ptr;
-
-            /* get number of bytes from start of extent and request
-             * buffers to the start of the overlap region */
-            size_t ext_byte_offset, req_byte_offset, cover_length;
-            char* req_ptr = get_extent_coverage(req, ext_start, ext_length,
-                                                &req_byte_offset,
-                                                &ext_byte_offset,
-                                                &cover_length);
-            assert(req_ptr != NULL);
-
-            /* copy data from local write log into user buffer */
-            off_t log_offset = ext_log_pos + ext_byte_offset;
-            size_t nread = 0;
-            /* we need to use the logio_ctx from correct client */
-            logio_context* logio_ctx = NULL;
-            if (next->client_id == client->state.client_id) {
-                logio_ctx = client->state.logio_ctx;
-            } else if (client->logio_ctx_ptrs[next->client_id] != NULL) {
-                logio_ctx = client->logio_ctx_ptrs[next->client_id];
-            } else {
-                size_t shmem_size = 0;
-                if (client->state.logio_ctx->shmem != NULL) {
-                    shmem_size = client->state.logio_ctx->shmem->size;
-                }
-                char* spill_dir = NULL;
-                if (client->state.logio_ctx->spill_sz > 0) {
-                    spill_dir = client->cfg.logio_spill_dir;
-                }
-                unifyfs_logio_init(client->state.app_id,
-                                   next->client_id,
-                                   shmem_size,
-                                   client->state.logio_ctx->spill_sz,
-                                   spill_dir,
-                                   &client->logio_ctx_ptrs[next->client_id]);
-                logio_ctx = client->logio_ctx_ptrs[next->client_id];
-            }
-            if (NULL != logio_ctx) {
-                int rc = unifyfs_logio_read(logio_ctx, log_offset,
-                                            cover_length, req_ptr, &nread);
-                if (rc == UNIFYFS_SUCCESS) {
-                    /* update bytes we have filled in the request buffer */
-                    update_read_req_coverage(req, req_byte_offset, nread);
-                } else {
-                    LOGERR("local log read failed for offset=%zu size=%zu",
-                           (size_t) log_offset, cover_length);
-                    req->errcode = rc;
-                }
-            }
-            /* get the next element in the tree */
-            next = seg_tree_iter(extents, next);
-        }
-
-        /* copy request data to list we completed locally */
-        memcpy(&local_reqs[local_count], req, sizeof(read_req_t));
-        local_count++;
-
-        /* done reading the tree */
-        seg_tree_unlock(extents);
     }
 
     /* return to user the number of key/values we set */
@@ -596,7 +591,10 @@ int process_gfid_read(unifyfs_client* client,
     if (meta != NULL) {
         /* attempt to complete requests locally if enabled */
         if (client->use_local_extents || client->use_node_local_extents) {
-            // MJB TODO - handle client-local and node-local reads
+            int rc = service_local_read(client, req);
+            if (rc == UNIFYFS_SUCCESS) {
+                return rc;
+            }
         }
     }
 
@@ -690,15 +688,16 @@ int process_gfid_reads(unifyfs_client* client,
             meta = unifyfs_get_meta_from_fid(client, fid);
             if (meta != NULL) {
                 if (!meta->attrs.is_laminated || !meta->needs_reads_sync) {
-                    /* do not proceed for this request as it is not laminated
-                     * it is not a laminated file or has already been synced.*/
+                    /* do not proceed for this request as file is not
+                     * laminated, or has already been synced from server */
                     continue;
                 }
+                meta->needs_reads_sync = 0;
                 num_request_selected++;
-                off_t filesize_offt = unifyfs_gfid_filesize(client,
-                                                            in_reqs[i].gfid);
+
+                // laminated file attributes include accurate file size
                 cur->chunk.file_offset = 0;
-                cur->chunk.length = filesize_offt - 1;
+                cur->chunk.length = (size_t) meta->attrs.size;
                 cur->chunk.gfid = in_reqs[i].gfid;
                 if (i < in_count - 1) {
                     cur->next = calloc(1, sizeof(chunk_list_t));
@@ -707,7 +706,6 @@ int process_gfid_reads(unifyfs_client* client,
                 } else {
                     cur->next = NULL;
                 }
-                meta->needs_reads_sync = 0;
             }
         }
         if (num_request_selected > 0) {
@@ -761,8 +759,8 @@ int process_gfid_reads(unifyfs_client* client,
          * completed requests from in_reqs into local_reqs, and it copies
          * any requests that can't be completed locally into the server_reqs
          * to be processed by the server */
-        service_local_reqs(client, in_reqs, in_count,
-                           local_reqs, server_reqs, &server_count);
+        service_local_read_requests(client, in_reqs, in_count,
+                                    local_reqs, server_reqs, &server_count);
         local_count = in_count - server_count;
         for (i = 0; i < local_count; i++) {
             /* get pointer to next read request */
@@ -771,7 +769,7 @@ int process_gfid_reads(unifyfs_client* client,
             update_read_req_result(client, req);
         }
 
-        /* return early if we satisfied all requests locally */
+        /* return early if we serviced all requests locally */
         if (server_count == 0) {
             /* copy completed requests back into user's array */
             memcpy(in_reqs, local_reqs, in_count * sizeof(read_req_t));

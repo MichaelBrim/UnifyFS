@@ -250,11 +250,10 @@ int unifyfs_fid_create_file(unifyfs_client* client,
     meta->attrs.ctime = tp;
 
     /* set UnifyFS client metadata */
-    meta->fid            = fid;
-    meta->storage        = FILE_STORAGE_NULL;
-    meta->needs_writes_sync     = 0;
-    /* first time we read a laminated file we want to sync extents */
-    meta->needs_reads_sync     = 1;
+    meta->fid = fid;
+    meta->storage = FILE_STORAGE_NULL;
+    meta->needs_writes_sync = 0;
+    meta->needs_reads_sync = 1; /* sync upon first read from laminated file */
     meta->pending_unlink = 0;
 
     return fid;
@@ -883,7 +882,7 @@ static int fid_truncate_write_meta(unifyfs_client* client,
         /* All writes should be removed. Clear extents_sync */
         seg_tree_clear(&meta->extents_sync);
 
-        if (client->use_local_extents) {
+        if (client->use_local_extents  || client->use_node_local_extents) {
             /* Clear the local extent cache too */
             seg_tree_clear(&meta->extents);
         }
@@ -892,7 +891,7 @@ static int fid_truncate_write_meta(unifyfs_client* client,
 
     unsigned long trunc_off = (unsigned long) trunc_sz;
     int rc = seg_tree_remove(&meta->extents_sync, trunc_off, ULONG_MAX);
-    if (client->use_local_extents) {
+    if (client->use_local_extents || client->use_node_local_extents) {
         rc = seg_tree_remove(&meta->extents, trunc_off, ULONG_MAX);
     }
     if (rc) {

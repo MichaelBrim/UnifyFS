@@ -610,7 +610,7 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
 }
 
 static
-int compare_chunk_read_reqs(const void* _c1, const void* _c2)
+int compare_data_chunks(const void* _c1, const void* _c2)
 {
     unifyfs_data_chunk_t* c1 = (unifyfs_data_chunk_t*) _c1;
     unifyfs_data_chunk_t* c2 = (unifyfs_data_chunk_t*) _c2;
@@ -709,7 +709,7 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
 
         if (n_chunks > 1) {
             /* sort the requests based on server rank */
-            qsort(chunks, n_chunks, sizeof(*chunks), compare_chunk_read_reqs);
+            qsort(chunks, n_chunks, sizeof(*chunks), compare_data_chunks);
         }
         unifyfs_data_chunk_t* chk = chunks;
         for (i = 0; i < n_chunks; i++, chk++) {
