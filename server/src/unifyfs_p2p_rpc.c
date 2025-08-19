@@ -100,7 +100,9 @@ int wait_for_p2p_request(p2p_request* preq)
     int rc = UNIFYFS_SUCCESS;
 
     /* finish rpc async call */
-    rc = async_rpc_request_finish(preq->req_state);
+    rc = async_rpc_request_finish(preq->req_state,
+                                  margo_service_timeout_msec,
+                                  margo_service_retry_count);
     if (rc != UNIFYFS_SUCCESS) {
         LOGERR("failed to finish p2p request(%p)", preq);
     }
