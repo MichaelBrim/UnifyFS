@@ -435,12 +435,16 @@ int main(int argc, char* argv[])
                         global_write_sync_bw);
         test_print_once(cfg, "Stat Time Pre-Laminate is %.6lf s",
                         time_stat_pre.elapsed_sec_all);
-        test_print_once(cfg, "Stat Time Pre-Laminate2 is %.6lf s",
-                        time_stat_pre2.elapsed_sec_all);
-        test_print_once(cfg, "File Laminate Time is %.6lf s",
-                        time_laminate.elapsed_sec_all);
-        test_print_once(cfg, "Stat Time Post-Laminate is %.6lf s",
-                        time_stat_post.elapsed_sec_all);
+        if (cfg->post_wr_trunc) {
+            test_print_once(cfg, "Stat Time Pre-Laminate2 is %.6lf s",
+                            time_stat_pre2.elapsed_sec_all);
+        }
+        if (cfg->laminate) {
+            test_print_once(cfg, "File Laminate Time is %.6lf s",
+                            time_laminate.elapsed_sec_all);
+            test_print_once(cfg, "Stat Time Post-Laminate is %.6lf s",
+                            time_stat_post.elapsed_sec_all);
+        }
         test_print_once(cfg, "Minimum Local Read BW is %.3lf MiB/s",
                         min_local_read_bw);
         test_print_once(cfg, "Maximum Local Read BW is %.3lf MiB/s",
