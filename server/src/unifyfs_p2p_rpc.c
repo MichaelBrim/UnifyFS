@@ -98,15 +98,43 @@ int forward_p2p_request(p2p_request* preq)
 int wait_for_p2p_request(p2p_request* preq)
 {
     int rc = UNIFYFS_SUCCESS;
+    int done = 0;
+    int tries = margo_service_retry_count;
 
     /* finish rpc async call */
-    rc = async_rpc_request_finish(preq->req_state,
-                                  margo_service_timeout_msec,
-                                  margo_service_retry_count);
+    do {
+        rc = async_rpc_request_finish(preq->req_state);
+        if (rc != UNIFYFS_SUCCESS) {
+            if (rc == UNIFYFS_ERROR_TIMEOUT) {
+                tries--;
+                if (tries <= 0) {
+                    done = 1;
+                } else {
+                    /* generate a new request handle */
+                    hg_handle_t new_handle = HG_HANDLE_NULL;
+                    rpc_state* rpc = preq->req_state;
+                    hg_return_t hret = margo_create(rpc->mid, rpc->maddr,
+                                                    rpc->rpc_id, &new_handle);
+                    if (hret != HG_SUCCESS) {
+                        LOGERR("margo_create() failed - %s",
+                               HG_Error_to_string(hret));
+                        done = 1;
+                    } else {
+                        margo_destroy(rpc->handle);
+                        rpc->handle = new_handle;
+                        rc = forward_p2p_request(preq);
+                    }
+                }
+            }
+        } else {
+            // some other error encountered
+            done = 1;
+        }
+    } while (!done);
+    
     if (rc != UNIFYFS_SUCCESS) {
         LOGERR("failed to finish p2p request(%p)", preq);
     }
-
     return rc;
 }
 

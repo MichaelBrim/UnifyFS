@@ -61,9 +61,7 @@ int sync_rpc_response(rpc_state* rpc,
 
 int async_rpc_request(rpc_state* rpc,
                       int timeout_msec);
-int async_rpc_request_finish(rpc_state* rpc,
-                             int timeout_msec,
-                             int retry);
+int async_rpc_request_finish(rpc_state* rpc);
 
 int async_rpc_response(rpc_state* rpc,
                        int retry);

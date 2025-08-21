@@ -171,6 +171,7 @@ create_rpc_request(hg_id_t rpc_id,
             new_rpc->initiator = 1;
             new_rpc->handle = handle;
             new_rpc->mid = mid;
+            new_rpc->maddr = maddr;
             new_rpc->rpc_id = rpc_id;
 
             if (NULL != input) {
@@ -380,58 +381,34 @@ int async_rpc_request(rpc_state* rpc,
     return ret;
 }
 
-int async_rpc_request_finish(rpc_state* rpc,
-                             int timeout_msec,
-                             int retry)
+int async_rpc_request_finish(rpc_state* rpc)
 {
     if (NULL == rpc)
         return EINVAL;
 
     int ret = UNIFYFS_SUCCESS;
-    int done = 0;
-    do {
-        hg_return_t hret = margo_wait(rpc->mreq);
-        if (hret == HG_SUCCESS) {
-            done = 1;
-            if (NULL != rpc->outputs) {
-                hret = margo_get_output(rpc->handle, rpc->outputs);
-                if (hret != HG_SUCCESS) {
-                    LOGERR("margo_get_output(%p) failed - %s",
-                           rpc->handle, HG_Error_to_string(hret));
-                    ret = UNIFYFS_ERROR_MARGO;
-                } else {
-                    rpc->have_output = 1;
-                }
-            }
-            
-        } else if (hret == HG_TIMEOUT) {
-            LOGINFO("margo_iforward_timed(%p) timed-out",
-                    rpc->handle);
-            if (!retry) {
-                done = 1;
-                ret = UNIFYFS_ERROR_TIMEOUT;
+    
+    hg_return_t hret = margo_wait(rpc->mreq);
+    if (hret == HG_SUCCESS) {
+        if (NULL != rpc->outputs) {
+            hret = margo_get_output(rpc->handle, rpc->outputs);
+            if (hret != HG_SUCCESS) {
+                LOGERR("margo_get_output(%p) failed - %s",
+                       rpc->handle, HG_Error_to_string(hret));
+                ret = UNIFYFS_ERROR_MARGO;
             } else {
-                double timeout_ms = 1.0 * timeout_msec;
-                margo_request mreq;
-                retry -= 1;
-                hret = margo_iforward_timed(rpc->handle, rpc->inputs,
-                                            timeout_ms, &mreq);
-                if (hret != HG_SUCCESS) { /* other forwarding error */
-                    LOGERR("margo_iforward_timed(%p) failed - %s",
-                        rpc->handle, HG_Error_to_string(hret));
-                    ret = UNIFYFS_ERROR_MARGO;
-                } else { /* success */
-                    LOGDBG("margo_iforward_timed(%p) successful", rpc->handle);
-                    rpc->mreq = mreq;
-                }
+                rpc->have_output = 1;
             }
-        } else { /* other forwarding error */
-            done = 1;
-            LOGERR("margo_wait(%p) failed - %s",
-                   rpc->mreq, HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
-        } 
-    } while (!done);
+        }
+    } else if (hret == HG_TIMEOUT) {
+        LOGINFO("margo_iforward_timed(%p) timed-out",
+                rpc->handle);
+        ret = UNIFYFS_ERROR_TIMEOUT;
+    } else { /* other forwarding error */
+        LOGERR("margo_wait(%p) failed - %s",
+               rpc->mreq, HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    } 
     return ret;
 }
 

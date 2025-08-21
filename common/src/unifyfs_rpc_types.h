@@ -24,6 +24,7 @@
 /* Common state necessary to track and cleanup Margo RPCs */
 typedef struct rpc_state {
     margo_instance_id mid; // which instance (client|server) this RPC uses
+    hg_addr_t maddr;       // rpc server address
     hg_id_t rpc_id;        // registered RPC id
     hg_handle_t handle;    // handle passed to RPC handler func
     margo_request mreq;    // request id for non-blocking RPCs
