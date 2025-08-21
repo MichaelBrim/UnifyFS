@@ -50,6 +50,10 @@ int init_p2p_request(server_rpc_e request_op,
 
     memset((void*)preq, 0, sizeof(p2p_request));
 
+    if (server_exiting) {
+        return UNIFYFS_FAILURE;
+    }
+
     preq->req_op = request_op;
     preq->gfid = gfid;
 
@@ -306,6 +310,10 @@ server_rpc_req_t* allocate_server_rpc_state(server_rpc_e rpc_type,
                                             size_t input_sz,
                                             size_t output_sz)
 {
+    if (server_exiting) {
+        return NULL;
+    }
+
     server_rpc_req_t* sreq = (server_rpc_req_t*)
         calloc(1, sizeof(server_rpc_req_t));
     if (NULL != sreq) {

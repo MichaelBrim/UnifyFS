@@ -490,7 +490,6 @@ int margo_server_rpc_finalize(void)
     if (NULL != unifyfsd_rpc_context) {
         /* define a temporary to refer to context */
         ServerRpcContext_t* ctx = unifyfsd_rpc_context;
-        unifyfsd_rpc_context = NULL;
 
         rpc_clean_local_server_addr();
 
@@ -525,9 +524,6 @@ int margo_server_rpc_finalize(void)
         /* NOTE: 2nd call to margo_finalize() sometimes crashes - Margo bug? */
         LOGDBG("finalizing client-server margo");
         margo_finalize(ctx->shm_mid);
-
-        /* free memory allocated for context structure */
-        free(ctx);
     }
 
     return rc;

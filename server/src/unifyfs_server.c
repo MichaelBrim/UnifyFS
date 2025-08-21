@@ -54,6 +54,8 @@ unifyfs_cfg_t server_cfg;
 
 bool use_server_local_extents; // = false
 
+bool server_exiting; // = false
+
 /* arraylist to track failed clients */
 arraylist_t* failed_clients; // = NULL
 
@@ -532,6 +534,8 @@ static int unifyfs_exit(void)
      * return the most recent value of ret.
      */
 
+    server_exiting = true;
+
     /* iterate over each active application and free resources */
     LOGDBG("cleaning application state");
     ABT_mutex_lock(app_configs_abt_sync);
@@ -589,6 +593,11 @@ static int unifyfs_exit(void)
 
     LOGDBG("all done!");
     unifyfs_log_close();
+
+    if (NULL != unifyfsd_rpc_context) {
+        free(unifyfsd_rpc_context);
+        unifyfsd_rpc_context = NULL;
+    }
 
     return ret;
 }

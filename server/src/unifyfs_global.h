@@ -71,6 +71,8 @@ extern int glb_pmi_rank;
 extern int glb_pmi_size;
 extern int server_pid;
 
+extern bool server_exiting;
+
 /* hostname for this server */
 extern char glb_host[UNIFYFS_MAX_HOSTNAME];
 
