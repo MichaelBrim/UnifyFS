@@ -51,6 +51,10 @@ client_rpc_req_t* allocate_client_rpc_state(client_rpc_e rpc_type,
                                             size_t input_sz,
                                             size_t output_sz)
 {
+    if (server_exiting) {
+        return NULL;
+    }
+
     client_rpc_req_t* creq = (client_rpc_req_t*)
         calloc(1, sizeof(client_rpc_req_t));
     if (NULL != creq) {
@@ -223,7 +227,6 @@ void process_client_attach_rpc(client_rpc_req_t* creq)
 
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
-    
 }
 
 
@@ -332,7 +335,6 @@ void process_client_mount_rpc(client_rpc_req_t* creq)
 
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
-    
 }
 
 void process_client_unmount_rpc(client_rpc_req_t* creq)
@@ -362,7 +364,6 @@ void process_client_unmount_rpc(client_rpc_req_t* creq)
 
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
-    
 }
 
 void process_client_metaget_rpc(client_rpc_req_t* creq)
