@@ -94,11 +94,11 @@ static margo_instance_id setup_remote_target(void)
 
     /* initialize margo */
     margo_instance_id mid = margo_init(server_addr, MARGO_SERVER_MODE,
-        margo_use_progress_thread, margo_server_server_pool_sz);
+        margo_use_progress_thread, margo_service_pool_sz);
     if (mid == MARGO_INSTANCE_NULL) {
         LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed",
                server_addr, margo_use_progress_thread,
-               margo_server_server_pool_sz);
+               margo_service_pool_sz);
         if (server_addr == PROTOCOL_MARGO_OFI_TCP) {
             /* try "ofi+sockets" instead */
             server_addr = PROTOCOL_MARGO_OFI_SOCKETS;
@@ -108,7 +108,7 @@ static margo_instance_id setup_remote_target(void)
             if (mid == MARGO_INSTANCE_NULL) {
                 LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed",
                        server_addr, margo_use_progress_thread,
-                       margo_server_server_pool_sz);
+                       margo_service_pool_sz);
                 return mid;
             }
         }
