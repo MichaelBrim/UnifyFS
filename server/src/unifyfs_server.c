@@ -405,9 +405,16 @@ int main(int argc, char* argv[])
         margo_lazy_connect = b;
     }
 
-    rc = configurator_bool_val(server_cfg.margo_tcp, &b);
-    if (0 == rc) {
-        margo_use_tcp = b;
+    if (server_cfg.margo_server_address != NULL) {
+        margo_use_address = true;
+        margo_init_address = strdup(server_cfg.margo_server_address);
+    }
+
+    if (!margo_use_address) {
+        rc = configurator_bool_val(server_cfg.margo_tcp, &b);
+        if (0 == rc) {
+            margo_use_tcp = b;
+        }
     }
 
     rc = configurator_int_val(server_cfg.margo_client_pool_size, &l);

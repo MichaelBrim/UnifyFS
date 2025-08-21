@@ -79,6 +79,8 @@ typedef struct ServerRpcContext {
 extern ServerRpcContext_t* unifyfsd_rpc_context;
 
 /* margo configuration settings */
+extern char* margo_init_address;
+extern bool margo_use_address;
 extern bool margo_use_tcp;
 extern bool margo_lazy_connect;
 extern int  margo_client_pool_sz;
