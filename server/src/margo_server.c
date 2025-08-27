@@ -662,6 +662,11 @@ hg_id_t get_rpc_info(server_rpc_e rpc,
         *input_sz = sizeof(metaset_in_t);
         *output_sz = sizeof(metaset_out_t);
         break;
+    case UNIFYFS_SERVER_RPC_READ_CHUNK:
+        id = unifyfsd_rpc_context->rpcs.read_chunk_id;
+        *input_sz = sizeof(read_chunk_in_t);
+        *output_sz = sizeof(read_chunk_out_t);
+        break;
     case UNIFYFS_SERVER_RPC_SERVER_PID:
         id = unifyfsd_rpc_context->rpcs.server_pid_id;
         *input_sz = sizeof(server_pid_in_t);
