@@ -723,6 +723,7 @@ hg_id_t get_rpc_info(server_rpc_e rpc,
         *output_sz = sizeof(unlink_bcast_out_t);
         break;
     default:
+        LOGERR("unhandled rpc type=%d", rpc);
         break;
     }
     return id;
