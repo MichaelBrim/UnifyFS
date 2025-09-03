@@ -547,6 +547,26 @@ int sm_add_extents(int gfid,
     return ret;
 }
 
+int sm_cache_extents(int gfid,
+                     size_t num_extents,
+                     extent_metadata* extents,
+                     struct timespec* cache_time)
+{
+    int owner_rank = hash_gfid_to_server(gfid);
+    int is_owner = (owner_rank == glb_pmi_rank);
+
+    int ret = UNIFYFS_SUCCESS;
+    if (!is_owner) {
+        unsigned int n_extents = (unsigned int) num_extents;
+        ret = unifyfs_inode_cache_extents(gfid, n_extents, extents, cache_time);
+        if (ret) {
+            LOGERR("failed to cache %u extents to gfid=%d (rc=%d, is_owner=%d)",
+                   n_extents, gfid, ret, is_owner);
+        }
+    }
+    return ret;
+}
+
 int sm_find_extents(int gfid,
                     size_t num_extents,
                     unifyfs_extent_t* extents,
@@ -870,6 +890,54 @@ static int process_extents_bcast_rpc(server_rpc_req_t* req)
     int ret = sm_add_extents(gfid, num_extents, extents);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("add_extents(gfid=%d) failed - rc=%d", gfid, ret);
+    }
+    collective_set_local_retval(req->coll, ret);
+
+    /* create a ULT to finish broadcast operation */
+    ret = invoke_bcast_progress_rpc(req->coll);
+
+    return ret;
+}
+
+static int process_extents_cache_bcast_rpc(server_rpc_req_t* req)
+{
+    /* get target file and extents */
+    coll_request* coll = (coll_request*) req->coll;
+    extent_cache_bcast_in_t* in = coll->input;
+    int gfid = (int) in->gfid;
+    size_t num_extents = (size_t) in->num_extents;
+    extent_metadata* extents = coll->bulk_buf;
+
+    LOGDBG("gfid=%d num_extents=%zu", gfid, num_extents);
+
+    /* add extents */
+    struct timespec ts = in->timestamp;
+    int ret = sm_cache_extents(gfid, num_extents, extents, &ts);
+    if (ret != UNIFYFS_SUCCESS) {
+        LOGERR("cache_extents(gfid=%d) failed - rc=%d", gfid, ret);
+    }
+    collective_set_local_retval(req->coll, ret);
+
+    /* create a ULT to finish broadcast operation */
+    ret = invoke_bcast_progress_rpc(req->coll);
+
+    return ret;
+}
+
+static int process_invalidate_extents_cache_bcast_rpc(server_rpc_req_t* req)
+{
+    /* get target file and extents */
+    coll_request* coll = (coll_request*) req->coll;
+    invalidate_extent_cache_bcast_in_t* in = coll->input;
+    int gfid = (int) in->gfid;
+
+    LOGDBG("invalidating extents cache for gfid=%d", gfid);
+
+    /* invalidate cached extents */
+    struct timespec ts = {0};
+    int ret = sm_cache_extents(gfid, 0, NULL, &ts);
+    if (ret != UNIFYFS_SUCCESS) {
+        LOGERR("cache_extents(gfid=%d) failed - rc=%d", gfid, ret);
     }
     collective_set_local_retval(req->coll, ret);
 
@@ -1298,6 +1366,12 @@ static int process_service_requests(void)
             break;
         case UNIFYFS_SERVER_BCAST_RPC_EXTENTS:
             rret = process_extents_bcast_rpc(req);
+            break;
+        case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE:
+            rret = process_extents_cache_bcast_rpc(req);
+            break;
+        case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE:
+            rret = process_invalidate_extents_cache_bcast_rpc(req);
             break;
         case UNIFYFS_SERVER_BCAST_RPC_FILEATTR:
             rret = process_fileattr_bcast_rpc(req);

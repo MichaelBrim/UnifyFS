@@ -90,6 +90,24 @@ int unifyfs_invoke_broadcast_bootstrap_complete(void);
 int unifyfs_invoke_broadcast_extents(int gfid);
 
 /**
+ * @brief Broadcast file extents metadata to cache at all servers
+ *
+ * @param gfid     target file
+ *
+ * @return success|failure
+ */
+int unifyfs_invoke_broadcast_extents_cache(int gfid);
+
+/**
+ * @brief Broadcast extents cache invalidation to all servers
+ *
+ * @param gfid     target file
+ *
+ * @return success|failure
+ */
+int unifyfs_invoke_broadcast_invalidate_extents_cache(int gfid);
+
+/**
  * @brief Broadcast file attributes metadata to all servers
  *
  * @param gfid      target file

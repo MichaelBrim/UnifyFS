@@ -923,30 +923,13 @@ int invoke_client_mread_rpc(unifyfs_client* client,
 
 /* invokes the client metaget rpc function */
 int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
-                                             int num_req,
-                                             chunk_list_t* read_req,
+                                             int gfid,
                                              size_t* chunk_count,
                                              unifyfs_data_chunk_t** chunks)
 {
     /* check that we have initialized margo */
     if (NULL == client_rpc_context) {
         return UNIFYFS_FAILURE;
-    }
-
-    size_t extents_size = num_req * sizeof(unifyfs_extent_t);
-    void* buffer = malloc(extents_size);
-    if (NULL == buffer) {
-        return ENOMEM;
-    }
-
-    unifyfs_extent_t* int_extents = (unifyfs_extent_t*)buffer;
-    chunk_list_t* cur = read_req;
-    for (int i = 0; i < num_req; i++) {
-        unifyfs_extent_t* ext = int_extents + i;
-        ext->gfid = cur->chunk.gfid;
-        ext->offset = cur->chunk.file_offset;
-        ext->length = cur->chunk.length;
-        cur = cur->next;
     }
 
     const char* rpc_name = "unifyfs_node_local_extents_get";
@@ -960,25 +943,13 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
                            (void*)&out, 0);
     if (NULL == rpc) {
         LOGERR("failed to create %s rpc request", rpc_name);
-        free(buffer);
         return UNIFYFS_FAILURE;
     }
 
     /* set input parameters */
-    hg_return_t hret = margo_bulk_create(rpc->mid,
-                                         1, &buffer, &extents_size,
-                                         HG_BULK_READ_ONLY, &in.bulk_data);
-    if (hret != HG_SUCCESS) {
-        LOGERR("failed to create bulk for %s rpc request - %s",
-               rpc_name, HG_Error_to_string(hret));
-        cleanup_rpc_state(rpc);
-        free(buffer);
-        return UNIFYFS_ERROR_MARGO;
-    }
     in.app_id = (int32_t) client->state.app_id;
     in.client_id = (int32_t) client->state.client_id;
-    in.num_req = num_req;
-    in.bulk_size = extents_size;
+    in.gfid = gfid;
 
     /* call rpc function */
     int ret;
@@ -996,9 +967,7 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
         ret = rc;
     }
 
-    margo_bulk_free(in.bulk_data);
     cleanup_rpc_state(rpc);
-    free(buffer);
     return ret;
 }
 

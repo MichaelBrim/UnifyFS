@@ -37,11 +37,13 @@ typedef struct ServerRpcIds {
     hg_id_t bootstrap_complete_bcast_id;
     hg_id_t chunk_read_request_id;
     hg_id_t chunk_read_response_id;
-    hg_id_t extent_add_id;
+    hg_id_t extents_add_id;
     hg_id_t extent_bcast_id;
-    hg_id_t extent_lookup_id;
+    hg_id_t extent_cache_bcast_id;
+    hg_id_t extents_get_id;
     hg_id_t fileattr_bcast_id;
     hg_id_t filesize_id;
+    hg_id_t invalidate_extent_cache_bcast_id;
     hg_id_t laminate_id;
     hg_id_t laminate_bcast_id;
     hg_id_t metaget_id;

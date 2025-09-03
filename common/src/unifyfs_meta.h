@@ -191,13 +191,25 @@ int unifyfs_file_attr_update(int attr_op,
         return EINVAL;
     }
 
-    if (attr_op == UNIFYFS_FILE_ATTR_OP_CREATE) {
-        dst->gfid = src->gfid;
-    }
-
     struct timespec tp = {0};
     clock_gettime(CLOCK_REALTIME, &tp);
     dst->last_update = tp.tv_sec;
+
+    /* when dst == src, we're just doing a "change" timestamp update */
+    if ((dst == src) &&
+        ((attr_op == UNIFYFS_FILE_ATTR_OP_DATA) ||
+         (attr_op == UNIFYFS_FILE_ATTR_OP_LAMINATE) ||
+         (attr_op == UNIFYFS_FILE_ATTR_OP_TRUNCATE))) {
+        LOGDBG("setting attr.mtime to %d.%09ld",
+               (int)tp.tv_sec, tp.tv_nsec);
+        dst->mtime = tp;
+        dst->ctime = tp;
+        return 0;
+    }
+    
+    if (attr_op == UNIFYFS_FILE_ATTR_OP_CREATE) {
+        dst->gfid = src->gfid;
+    }
 
     LOGDBG("updating attributes for gfid=%d", dst->gfid);
 

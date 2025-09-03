@@ -329,9 +329,7 @@ DECLARE_MARGO_RPC_HANDLER(unifyfs_heartbeat_rpc)
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_in_t,
                  ((int32_t)(app_id))
                  ((int32_t)(client_id))
-                 ((hg_size_t)(num_req))
-                 ((hg_bulk_t)(bulk_data))
-                 ((hg_size_t)(bulk_size)))
+                 ((int32_t)(gfid)))
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_out_t,
                  ((int32_t)(ret))
                  ((hg_size_t)(chunk_count))

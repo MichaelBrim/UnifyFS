@@ -118,23 +118,25 @@ int unifyfs_invoke_add_extents_rpc(int gfid,
                                    unsigned int num_extents,
                                    extent_metadata* extents);
 
+
+/* Lookup extent locations for target file */
+int unifyfs_find_extent_chunks(int gfid,
+                               unsigned int num_extents,
+                               unifyfs_extent_t* extents,
+                               unsigned int* num_chunks,
+                               unifyfs_data_chunk_t** chunks);
+
 /**
  * @brief Find location of extents for target file
  *
- * @param gfid         target file
- * @param num_extents  length of file extents array
- * @param extents      array of extents to find
+ * @param gfid  target file
  *
- * @param[out] num_chunks  number of chunk locations
- * @param[out] chunks      array of chunk locations for requested extents
+ * @param[in,out] timestamp  extents cache timestamp (in: local, out: owner)
  *
  * @return success|failure
  */
-int unifyfs_invoke_find_extents_rpc(int gfid,
-                                    unsigned int num_extents,
-                                    unifyfs_extent_t* extents,
-                                    unsigned int* num_chunks,
-                                    unifyfs_data_chunk_t** chunks);
+int unifyfs_invoke_get_extents_rpc(int gfid,
+                                   struct timespec* timestamp);
 
 /**
  * @brief Laminate the target file

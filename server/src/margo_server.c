@@ -165,7 +165,7 @@ static void register_server_server_rpcs(margo_instance_id mid)
             chunk_read_response_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
-    unifyfsd_rpc_context->rpcs.extent_add_id =
+    unifyfsd_rpc_context->rpcs.extents_add_id =
         MARGO_REGISTER_PROVIDER(mid, "add_extents_rpc",
             add_extents_in_t, add_extents_out_t, add_extents_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
@@ -175,14 +175,25 @@ static void register_server_server_rpcs(margo_instance_id mid)
             extent_bcast_in_t, extent_bcast_out_t, extent_bcast_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
-    unifyfsd_rpc_context->rpcs.extent_lookup_id =
-        MARGO_REGISTER_PROVIDER(mid, "find_extents_rpc",
-            find_extents_in_t, find_extents_out_t, find_extents_rpc,
+    unifyfsd_rpc_context->rpcs.extent_cache_bcast_id =
+        MARGO_REGISTER_PROVIDER(mid, "extent_cache_bcast_rpc",
+            extent_cache_bcast_in_t, extent_cache_bcast_out_t, extent_cache_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
+
+    unifyfsd_rpc_context->rpcs.extents_get_id =
+        MARGO_REGISTER_PROVIDER(mid, "get_extents_rpc",
+            get_extents_in_t, get_extents_out_t, get_extents_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_rpc_pool);
 
     unifyfsd_rpc_context->rpcs.fileattr_bcast_id =
         MARGO_REGISTER_PROVIDER(mid, "fileattr_bcast_rpc",
             fileattr_bcast_in_t, fileattr_bcast_out_t, fileattr_bcast_rpc,
+            MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
+
+    unifyfsd_rpc_context->rpcs.invalidate_extent_cache_bcast_id =
+        MARGO_REGISTER_PROVIDER(mid, "invalidate_extent_cache_bcast_rpc",
+            invalidate_extent_cache_bcast_in_t, invalidate_extent_cache_bcast_out_t,
+            invalidate_extent_cache_bcast_rpc,
             MARGO_DEFAULT_PROVIDER_ID, unifyfsd_rpc_context->svr_coll_pool);
 
     unifyfsd_rpc_context->rpcs.laminate_id =
@@ -638,14 +649,14 @@ hg_id_t get_rpc_info(server_rpc_e rpc,
         *output_sz = sizeof(chunk_read_response_out_t);
         break;
     case UNIFYFS_SERVER_RPC_EXTENTS_ADD:
-        id = unifyfsd_rpc_context->rpcs.extent_add_id;
+        id = unifyfsd_rpc_context->rpcs.extents_add_id;
         *input_sz = sizeof(add_extents_in_t);
         *output_sz = sizeof(add_extents_out_t);
         break;
-    case UNIFYFS_SERVER_RPC_EXTENTS_FIND:
-        id = unifyfsd_rpc_context->rpcs.extent_lookup_id;
-        *input_sz = sizeof(find_extents_in_t);
-        *output_sz = sizeof(find_extents_out_t);
+    case UNIFYFS_SERVER_RPC_EXTENTS_GET:
+        id = unifyfsd_rpc_context->rpcs.extents_get_id;
+        *input_sz = sizeof(get_extents_in_t);
+        *output_sz = sizeof(get_extents_out_t);
         break;
     case UNIFYFS_SERVER_RPC_LAMINATE:
         id = unifyfsd_rpc_context->rpcs.laminate_id;
@@ -691,6 +702,16 @@ hg_id_t get_rpc_info(server_rpc_e rpc,
         id = unifyfsd_rpc_context->rpcs.extent_bcast_id;
         *input_sz = sizeof(extent_bcast_in_t);
         *output_sz = sizeof(extent_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE:
+        id = unifyfsd_rpc_context->rpcs.extent_cache_bcast_id;
+        *input_sz = sizeof(extent_cache_bcast_in_t);
+        *output_sz = sizeof(extent_cache_bcast_out_t);
+        break;
+    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE:
+        id = unifyfsd_rpc_context->rpcs.invalidate_extent_cache_bcast_id;
+        *input_sz = sizeof(invalidate_extent_cache_bcast_in_t);
+        *output_sz = sizeof(invalidate_extent_cache_bcast_out_t);
         break;
     case UNIFYFS_SERVER_BCAST_RPC_FILEATTR:
         id = unifyfsd_rpc_context->rpcs.fileattr_bcast_id;

@@ -27,6 +27,18 @@ struct unifyfs_inode_tree _global_inode_tree;
 struct unifyfs_inode_tree* global_inode_tree = &_global_inode_tree;
 
 static inline
+void invalidate_extents_cache(struct unifyfs_inode* ino)
+{
+    // NOTE: this fn assumes inode is currently write-locked
+    if (NULL != ino->extents_cache) {
+        free(ino->extents_cache);
+    }
+    ino->extents_cache = NULL;
+    ino->extents_cache_count = 0;
+    ino->cache_time = (struct timespec) {0};
+}
+
+static inline
 struct unifyfs_inode* unifyfs_inode_alloc(int gfid, unifyfs_file_attr_t* attr)
 {
     struct unifyfs_inode* ino = calloc(1, sizeof(*ino));
@@ -42,6 +54,8 @@ struct unifyfs_inode* unifyfs_inode_alloc(int gfid, unifyfs_file_attr_t* attr)
         ino->gfid = gfid;
 
         ino->pending_extents = NULL;
+
+        invalidate_extents_cache(ino);
 
         unifyfs_file_attr_set_invalid(&(ino->attr));
         unifyfs_file_attr_update(UNIFYFS_FILE_ATTR_OP_CREATE,
@@ -146,6 +160,9 @@ int unifyfs_inode_destroy(struct unifyfs_inode* ino)
         }
 
         if (NULL != ino->extents) {
+            unifyfs_inode_wrlock(ino);
+
+            invalidate_extents_cache(ino);
 
             /* allocate an array to track local clients to which we should
              * send an unlink callback */
@@ -156,51 +173,50 @@ int unifyfs_inode_destroy(struct unifyfs_inode* ino)
             int cb_app_id = -1;
 
             /* iterate over extents and release local logio allocations */
-            unifyfs_inode_rdlock(ino);
-            {
-                last_client = -1;
-                struct extent_tree* tree = ino->extents;
-                struct extent_tree_node* curr = NULL;
-                while (NULL != (curr = extent_tree_iter(tree, curr))) {
-                    if (curr->extent.svr_rank == glb_pmi_rank) {
-                        /* lookup client's logio context and release
-                         * allocation for this extent */
-                        int app_id    = curr->extent.app_id;
-                        int client_id = curr->extent.cli_id;
-                        app_client* client = get_app_client(app_id, client_id);
-                        if ((NULL == client) ||
-                            (NULL == client->state.logio_ctx)) {
-                            continue;
-                        }
-                        logio_context* logio = client->state.logio_ctx;
-                        size_t nbytes = extent_length(&(curr->extent));
-                        off_t log_off = curr->extent.log_pos;
-                        int rc = unifyfs_logio_free(logio, log_off, nbytes);
-                        if (UNIFYFS_SUCCESS != rc) {
-                            LOGERR("failed to free logio allocation for "
-                                   "client[%d:%d] log_offset=%zu nbytes=%zu",
-                                   app_id, client_id, (size_t)log_off, nbytes);
-                        }
+            last_client = -1;
+            struct extent_tree* tree = ino->extents;
+            struct extent_tree_node* curr = NULL;
+            while (NULL != (curr = extent_tree_iter(tree, curr))) {
+                if (curr->extent.svr_rank == glb_pmi_rank) {
+                    /* lookup client's logio context and release
+                     * allocation for this extent */
+                    int app_id    = curr->extent.app_id;
+                    int client_id = curr->extent.cli_id;
+                    app_client* client = get_app_client(app_id, client_id);
+                    if ((NULL == client) ||
+                        (NULL == client->state.logio_ctx)) {
+                        continue;
+                    }
+                    logio_context* logio = client->state.logio_ctx;
+                    size_t nbytes = extent_length(&(curr->extent));
+                    off_t log_off = curr->extent.log_pos;
+                    int rc = unifyfs_logio_free(logio, log_off, nbytes);
+                    if (UNIFYFS_SUCCESS != rc) {
+                        LOGERR("failed to free logio allocation for "
+                               "client[%d:%d] log_offset=%zu nbytes=%zu",
+                               app_id, client_id, (size_t)log_off, nbytes);
+                    }
 
-                        if (NULL != local_clients) {
-                            if (-1 == cb_app_id) {
-                                cb_app_id = app_id;
-                            }
-                            /* add client id to local clients array */
-                            if (last_client != client_id) {
-                                assert(n_clients < max_clients);
-                                local_clients[n_clients] = client_id;
-                                n_clients++;
-                            }
-                            last_client = client_id;
+                    if (NULL != local_clients) {
+                        if (-1 == cb_app_id) {
+                            cb_app_id = app_id;
                         }
+                        /* add client id to local clients array */
+                        if (last_client != client_id) {
+                            assert(n_clients < max_clients);
+                            local_clients[n_clients] = client_id;
+                            n_clients++;
+                        }
+                        last_client = client_id;
                     }
                 }
             }
-            unifyfs_inode_unlock(ino);
 
             extent_tree_destroy(ino->extents);
             free(ino->extents);
+            ino->extents = NULL;
+
+            unifyfs_inode_unlock(ino);
 
             if (NULL != local_clients) {
                 qsort(local_clients, n_clients, sizeof(int), int_compare_fn);
@@ -327,6 +343,8 @@ int unifyfs_inode_truncate(int gfid, unsigned long size)
                 if (NULL != ino->extents) {
                     ret = extent_tree_truncate(ino->extents, size);
                 }
+                unifyfs_file_attr_update(UNIFYFS_FILE_ATTR_OP_TRUNCATE,
+                                         &ino->attr,  &ino->attr);
             }
         }
         unifyfs_inode_unlock(ino);
@@ -448,6 +466,22 @@ int unifyfs_inode_add_extents(int gfid,
         return EINVAL;
     }
 
+    int owner_rank = hash_gfid_to_server(gfid);
+    if (owner_rank == glb_pmi_rank) {
+        unifyfs_inode_rdlock(ino);
+        if ((NULL != ino->extents_cache) &&
+            (ino->attr.mtime.tv_sec == ino->cache_time.tv_sec) &&
+            (ino->attr.mtime.tv_nsec == ino->cache_time.tv_nsec)) {
+            /* this is the first time we're adding extents after the cache was
+             * last updated, so invalidate caches at other servers */
+            int rc = unifyfs_invoke_broadcast_invalidate_extents_cache(gfid);
+            if (rc != UNIFYFS_SUCCESS) {
+                LOGWARN("bcast of extent cache invalidate was not successful");
+            } 
+        }
+        unifyfs_inode_unlock(ino);
+    }
+
     int ret = UNIFYFS_SUCCESS;
     unifyfs_inode_wrlock(ino);
     {
@@ -474,6 +508,9 @@ int unifyfs_inode_add_extents(int gfid,
         if ((uint64_t)extent_sz > ino->attr.size) {
             ino->attr.size = extent_sz;
         }
+
+        unifyfs_file_attr_update(UNIFYFS_FILE_ATTR_OP_DATA,
+                                 &ino->attr,  &ino->attr);
     }
 add_unlock_inode:
     unifyfs_inode_unlock(ino);
@@ -481,6 +518,38 @@ add_unlock_inode:
     LOGINFO("added %d extents to inode (gfid=%d, filesize=%" PRIu64 ")",
             num_extents, gfid, ino->attr.size);
 
+    return ret;
+}
+
+int unifyfs_inode_cache_extents(int gfid,
+                                int num_extents,
+                                extent_metadata* extents,
+                                struct timespec* cache_time)
+{
+    struct unifyfs_inode* ino = unifyfs_inode_lookup(gfid);
+    if (NULL == ino) {
+        return ENOENT;
+    }
+
+    if (ino->attr.is_laminated) {
+        LOGERR("trying to cache extents for a laminated file (gfid=%d)",
+               gfid);
+        return EINVAL;
+    }
+
+    int ret = UNIFYFS_SUCCESS;
+    unifyfs_inode_wrlock(ino);
+    {
+        invalidate_extents_cache(ino);
+        if (num_extents > 0) {
+            ino->extents_cache = extents;
+            ino->extents_cache_count = num_extents;
+            ino->cache_time = *cache_time;
+            LOGINFO("cached %d extents to inode (gfid=%d)",
+                    num_extents, gfid);
+        }
+    }
+    unifyfs_inode_unlock(ino);
 
     return ret;
 }
@@ -519,6 +588,8 @@ int unifyfs_inode_laminate(int gfid)
         unifyfs_inode_wrlock(ino);
         {
             ino->attr.is_laminated = 1;
+            unifyfs_file_attr_update(UNIFYFS_FILE_ATTR_OP_LAMINATE,
+                                     &ino->attr,  &ino->attr);
         }
         unifyfs_inode_unlock(ino);
         LOGDBG("laminated file (gfid=%d)", gfid);
@@ -528,7 +599,8 @@ int unifyfs_inode_laminate(int gfid)
 
 int unifyfs_inode_get_extents(int gfid,
                               size_t* n,
-                              extent_metadata** extents)
+                              extent_metadata** extents,
+                              struct timespec* timestamp)
 {
     if ((NULL == n) || (NULL == extents)) {
         return EINVAL;
@@ -539,26 +611,63 @@ int unifyfs_inode_get_extents(int gfid,
     if (NULL == ino) {
         ret = ENOENT;
     } else {
+        extent_metadata* extarr = NULL;
+        size_t n_extents = 0;
+        int update_cache = 0;
         unifyfs_inode_rdlock(ino);
         {
-            struct extent_tree* tree = ino->extents;
-            size_t n_extents = tree->count;
-            extent_metadata* _extents = calloc(n_extents, sizeof(*_extents));
-            if (NULL == _extents) {
-                ret = ENOMEM;
+            if ((NULL != ino->extents_cache) &&
+                (ino->attr.mtime.tv_sec == ino->cache_time.tv_sec) &&
+                (ino->attr.mtime.tv_nsec == ino->cache_time.tv_nsec)) {
+                *extents = ino->extents_cache;
+                *n = ino->extents_cache_count;
             } else {
-                int i = 0;
-                struct extent_tree_node* curr = NULL;
-                while ((curr = extent_tree_iter(tree, curr)) != NULL) {
-                    _extents[i] = curr->extent;
-                    i++;
-                }
+                struct extent_tree* tree = ino->extents;
+                n_extents = tree->count;
+                extarr = calloc(n_extents, sizeof(extent_metadata));
+                if (NULL == extarr) {
+                    ret = ENOMEM;
+                } else {
+                    int i = 0;
+                    struct extent_tree_node* curr = NULL;
+                    while ((curr = extent_tree_iter(tree, curr)) != NULL) {
+                        extarr[i] = curr->extent;
+                        i++;
+                    }
 
-                *n = n_extents;
-                *extents = _extents;
+                    *n = n_extents;
+                    *extents = extarr;
+
+                    if (n_extents > ino->extents_cache_count) {
+                        // update cache if number of extents has increased
+                        update_cache = 1;
+                    }
+                }
+            }
+            if (NULL != timestamp) {
+                *timestamp = ino->cache_time;
             }
         }
         unifyfs_inode_unlock(ino);
+
+        if (update_cache) {
+            unifyfs_inode_wrlock(ino);
+            {
+                if (NULL != ino->extents_cache) {
+                    ino->extents_cache_count = 0;
+                    free(ino->extents_cache);
+                }
+                ino->extents_cache = calloc(n_extents,
+                                            sizeof(extent_metadata));
+                if (ino->extents_cache != NULL) {
+                    memcpy(ino->extents_cache, extarr,
+                           n_extents*sizeof(extent_metadata));
+                    ino->extents_cache_count = n_extents;
+                    ino->cache_time = ino->attr.mtime;
+                }
+            }
+            unifyfs_inode_unlock(ino);
+        }
     }
     return ret;
 }
@@ -832,7 +941,7 @@ int unifyfs_get_owned_files(unsigned int* num_files,
                 }
             }
 
-            /* We only want to copy file attrs that we're the owner of */
+            /* only want to copy attrs for files we own */
             int owner_rank = hash_gfid_to_server(node->attr.gfid);
             if (owner_rank == glb_pmi_rank) {
                 memcpy(&attr_list_int[num_files_int], &node->attr,

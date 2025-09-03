@@ -38,7 +38,7 @@ typedef enum {
     UNIFYFS_SERVER_RPC_CHUNK_READ_REQ,
     UNIFYFS_SERVER_RPC_CHUNK_READ_RESP,
     UNIFYFS_SERVER_RPC_EXTENTS_ADD,
-    UNIFYFS_SERVER_RPC_EXTENTS_FIND,
+    UNIFYFS_SERVER_RPC_EXTENTS_GET,
     UNIFYFS_SERVER_RPC_LAMINATE,
     UNIFYFS_SERVER_RPC_METAGET,
     UNIFYFS_SERVER_RPC_METASET,
@@ -48,6 +48,8 @@ typedef enum {
     UNIFYFS_SERVER_RPC_TRUNCATE,
     UNIFYFS_SERVER_BCAST_RPC_BOOTSTRAP,
     UNIFYFS_SERVER_BCAST_RPC_EXTENTS,
+    UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE,
+    UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE,
     UNIFYFS_SERVER_BCAST_RPC_FILEATTR,
     UNIFYFS_SERVER_BCAST_RPC_LAMINATE,
     UNIFYFS_SERVER_BCAST_RPC_METAGET,
@@ -127,17 +129,17 @@ MERCURY_GEN_PROC(add_extents_out_t,
                  ((int32_t)(ret)))
 DECLARE_MARGO_RPC_HANDLER(add_extents_rpc)
 
-/* Find file extent locations by querying owner */
-MERCURY_GEN_PROC(find_extents_in_t,
+/* Get file extent locations by querying owner */
+MERCURY_GEN_PROC(get_extents_in_t,
                  ((int32_t)(src_rank))
                  ((int32_t)(gfid))
+                 ((sys_timespec_t)(src_timestamp)))
+MERCURY_GEN_PROC(get_extents_out_t,
                  ((int32_t)(num_extents))
-                 ((hg_bulk_t)(extents)))
-MERCURY_GEN_PROC(find_extents_out_t,
-                 ((int32_t)(num_locations))
-                 ((hg_bulk_t)(locations))
+                 ((hg_bulk_t)(extents))
+                 ((sys_timespec_t)(owner_timestamp))
                  ((int32_t)(ret)))
-DECLARE_MARGO_RPC_HANDLER(find_extents_rpc)
+DECLARE_MARGO_RPC_HANDLER(get_extents_rpc)
 
 /* Laminate file at owner */
 MERCURY_GEN_PROC(laminate_in_t,
@@ -209,6 +211,25 @@ MERCURY_GEN_PROC(extent_bcast_in_t,
 MERCURY_GEN_PROC(extent_bcast_out_t,
                  ((int32_t)(ret)))
 DECLARE_MARGO_RPC_HANDLER(extent_bcast_rpc)
+
+/* Broadcast file extents cache to all servers */
+MERCURY_GEN_PROC(extent_cache_bcast_in_t,
+                 ((int32_t)(root))
+                 ((int32_t)(gfid))
+                 ((int32_t)(num_extents))
+                 ((hg_bulk_t)(extents))
+                 ((sys_timespec_t)(timestamp)))
+MERCURY_GEN_PROC(extent_cache_bcast_out_t,
+                 ((int32_t)(ret)))
+DECLARE_MARGO_RPC_HANDLER(extent_cache_bcast_rpc)
+
+/* Broadcast invalidate extents cache to all servers */
+MERCURY_GEN_PROC(invalidate_extent_cache_bcast_in_t,
+                 ((int32_t)(root))
+                 ((int32_t)(gfid)))
+MERCURY_GEN_PROC(invalidate_extent_cache_bcast_out_t,
+                 ((int32_t)(ret)))
+DECLARE_MARGO_RPC_HANDLER(invalidate_extent_cache_bcast_rpc)
 
 /* Broadcast file metadata to all servers */
 MERCURY_GEN_PROC(fileattr_bcast_in_t,

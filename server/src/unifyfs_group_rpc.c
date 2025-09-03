@@ -1078,9 +1078,9 @@ int unifyfs_invoke_broadcast_extents(int gfid)
 
     LOGDBG("BCAST_RPC: starting extents for gfid=%d", gfid);
 
-    size_t n_extents;
-    struct extent_metadata* extents;
-    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents);
+    size_t n_extents = 0;
+    struct extent_metadata* extents = NULL;
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, NULL);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("failed to get extents for gfid=%d", gfid);
         return ret;
@@ -1134,6 +1134,252 @@ int unifyfs_invoke_broadcast_extents(int gfid)
     if (ret != UNIFYFS_SUCCESS) {
         if (NULL != extents) {
             free(extents);
+        }
+    }
+
+    return ret;
+}
+
+/* file extents metadata cache broadcast rpc handler */
+static void extent_cache_bcast_rpc(hg_handle_t handle)
+{
+    LOGDBG("BCAST_RPC: cache extents handler");
+
+    /* assume we'll succeed */
+    int ret = UNIFYFS_SUCCESS;
+
+    coll_request* coll = NULL;
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.extent_cache_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(extent_cache_bcast_in_t),
+                                  sizeof(extent_cache_bcast_out_t));
+    if (NULL == sreq) {
+        ret = ENOMEM;
+    } else {
+        extent_cache_bcast_in_t*  in  = sreq->req_state->inputs;
+        extent_cache_bcast_out_t* out = sreq->req_state->outputs;
+
+        size_t num_extents = (size_t) in->num_extents;
+        size_t bulk_sz = num_extents * sizeof(struct extent_metadata);
+        hg_bulk_t local_bulk = HG_BULK_NULL;
+        void* extents_buf = pull_margo_bulk(handle, in->extents,
+                                            bulk_sz, &local_bulk);
+        if (NULL == extents_buf) {
+            LOGERR("failed to get bulk extents");
+            ret = UNIFYFS_ERROR_MARGO;
+        } else {
+            coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                     (void*)in, (void*)out, sizeof(*out),
+                                     in->extents, local_bulk, extents_buf);
+            if (NULL == coll) {
+                ret = ENOMEM;
+            } else {
+                /* collective takes ownership of handle and inputs/outputs, so
+                   mark them as NULL in server req to avoid double cleanup */
+                sreq->coll = coll;
+                sreq->req_state->handle = HG_HANDLE_NULL;
+                sreq->req_state->inputs = NULL;
+                sreq->req_state->outputs = NULL;
+
+                /* update input structure that we are forwarding to point
+                 * to our local bulk buffer. will restore on cleanup. */
+                in->extents = local_bulk;
+                ret = collective_forward(coll);
+                if (ret == UNIFYFS_SUCCESS) {
+                    ret = sm_submit_service_request(sreq);
+                    if (ret != UNIFYFS_SUCCESS) {
+                        LOGERR("failed to submit coll request to svcmgr");
+                    }
+                }
+            }
+        }
+    }
+
+    if (ret != UNIFYFS_SUCCESS) {
+        /* report failure back to caller */
+        extent_cache_bcast_out_t ebo;
+        ebo.ret = (int32_t) ret;
+        hg_return_t hret = margo_respond(handle, &ebo);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
+        }
+
+        if (NULL != coll) {
+            collective_cleanup(coll);
+        } 
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
+        }
+    }
+}
+DEFINE_MARGO_RPC_HANDLER(extent_cache_bcast_rpc)
+
+/* Execute broadcast tree for caching extent metadata */
+int unifyfs_invoke_broadcast_extents_cache(int gfid)
+{
+    /* assuming success */
+    int ret = UNIFYFS_SUCCESS;
+
+    LOGDBG("BCAST_RPC: starting extents for gfid=%d", gfid);
+
+    size_t n_extents = 0;
+    struct extent_metadata* extents = NULL;
+    struct timespec ts;
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, &ts);
+    if (ret != UNIFYFS_SUCCESS) {
+        LOGERR("failed to get extents for gfid=%d", gfid);
+        return ret;
+    }
+
+    if (0 == n_extents) {
+        /* nothing to broadcast */
+        return UNIFYFS_SUCCESS;
+    }
+
+    /* create bulk data structure containing the extents
+     * NOTE: bulk data is always read only at the root of the broadcast tree */
+    hg_size_t buf_size = n_extents * sizeof(*extents);
+    hg_bulk_t extents_bulk;
+    void* buf = (void*) extents;
+    hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid, 1,
+                                         &buf, &buf_size,
+                                         HG_BULK_READ_ONLY, &extents_bulk);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_bulk_create() failed - %s", HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    } else {
+        coll_request* coll = NULL;
+        extent_cache_bcast_in_t* in = calloc(1, sizeof(*in));
+        if (NULL == in) {
+            ret = ENOMEM;
+        } else {
+            /* set input params */
+            in->root        = (int32_t) glb_pmi_rank;
+            in->gfid        = (int32_t) gfid;
+            in->extents     = extents_bulk;
+            in->num_extents = (int32_t) n_extents;
+            in->timestamp = ts;
+
+            hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.extent_cache_bcast_id;
+            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE;
+            coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
+                                     glb_pmi_rank, (void*)in,
+                                     NULL, sizeof(extent_cache_bcast_out_t),
+                                     HG_BULK_NULL, extents_bulk, buf);
+            if (NULL == coll) {
+                ret = ENOMEM;
+            } else {
+                ret = collective_forward(coll);
+                if (ret == UNIFYFS_SUCCESS) {
+                    ret = invoke_bcast_progress_rpc(coll);
+                }
+            }
+        }
+    }
+
+    if (ret != UNIFYFS_SUCCESS) {
+        if (NULL != extents) {
+            free(extents);
+        }
+    }
+
+    return ret;
+}
+
+/* invalidate file extents metadata cache broadcast rpc handler */
+static void invalidate_extent_cache_bcast_rpc(hg_handle_t handle)
+{
+    LOGDBG("BCAST_RPC: invalidate extents cache handler");
+
+    /* assume we'll succeed */
+    int ret = UNIFYFS_SUCCESS;
+
+    coll_request* coll = NULL;
+    hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.invalidate_extent_cache_bcast_id;
+    server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE;
+    server_rpc_req_t* sreq = 
+        allocate_server_rpc_state(rpc, handle,
+                                  sizeof(invalidate_extent_cache_bcast_in_t),
+                                  sizeof(invalidate_extent_cache_bcast_out_t));
+    if (NULL == sreq) {
+        ret = ENOMEM;
+    } else {
+        invalidate_extent_cache_bcast_in_t*  in  = sreq->req_state->inputs;
+        invalidate_extent_cache_bcast_out_t* out = sreq->req_state->outputs;
+
+        coll = collective_create(rpc, handle, op_hgid, (int)(in->root),
+                                 (void*)in, (void*)out, sizeof(*out),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
+        } else {
+            /* collective takes ownership of handle and inputs/outputs, so
+               mark them as NULL in server req to avoid double cleanup */
+            sreq->coll = coll;
+            sreq->req_state->handle = HG_HANDLE_NULL;
+            sreq->req_state->inputs = NULL;
+            sreq->req_state->outputs = NULL;
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = sm_submit_service_request(sreq);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("failed to submit coll request to svcmgr");
+                }
+            }
+        }
+    }
+
+    if (ret != UNIFYFS_SUCCESS) {
+        /* report failure back to caller */
+        invalidate_extent_cache_bcast_out_t ebo;
+        ebo.ret = (int32_t) ret;
+        hg_return_t hret = margo_respond(handle, &ebo);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
+        }
+
+        if (NULL != coll) {
+            collective_cleanup(coll);
+        } 
+        if (NULL != sreq) {
+            release_server_rpc_state(sreq);
+        }
+    }
+}
+DEFINE_MARGO_RPC_HANDLER(invalidate_extent_cache_bcast_rpc)
+
+/* Execute broadcast tree for caching extent metadata */
+int unifyfs_invoke_broadcast_invalidate_extents_cache(int gfid)
+{
+    /* assuming success */
+    int ret = UNIFYFS_SUCCESS;
+
+    LOGDBG("BCAST_RPC: starting extents cache invalidate for gfid=%d", gfid);
+
+    coll_request* coll = NULL;
+    invalidate_extent_cache_bcast_in_t* in = calloc(1, sizeof(*in));
+    if (NULL == in) {
+        ret = ENOMEM;
+    } else {
+        /* set input params */
+        in->root        = (int32_t) glb_pmi_rank;
+        in->gfid        = (int32_t) gfid;
+
+        hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.invalidate_extent_cache_bcast_id;
+        server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE;
+        coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
+                                 glb_pmi_rank, (void*)in,
+                                 NULL, sizeof(invalidate_extent_cache_bcast_out_t),
+                                 HG_BULK_NULL, HG_BULK_NULL, NULL);
+        if (NULL == coll) {
+            ret = ENOMEM;
+        } else {
+            ret = collective_forward(coll);
+            if (ret == UNIFYFS_SUCCESS) {
+                ret = invoke_bcast_progress_rpc(coll);
+            }
         }
     }
 
@@ -1242,9 +1488,9 @@ int unifyfs_invoke_broadcast_laminate(int gfid)
 
     LOGDBG("BCAST_RPC: starting laminate for gfid=%d", gfid);
 
-    size_t n_extents;
-    struct extent_metadata* extents;
-    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents);
+    size_t n_extents = 0;
+    struct extent_metadata* extents = NULL;
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, NULL);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("failed to get extents for gfid=%d", gfid);
         return ret;

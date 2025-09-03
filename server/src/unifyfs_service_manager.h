@@ -90,6 +90,11 @@ int sm_add_extents(int gfid,
                    size_t num_extents,
                    extent_metadata* extents);
 
+int sm_cache_extents(int gfid,
+                     size_t num_extents,
+                     extent_metadata* extents,
+                     struct timespec* cache_time);
+
 int sm_find_extents(int gfid,
                     size_t num_extents,
                     unifyfs_extent_t* extents,

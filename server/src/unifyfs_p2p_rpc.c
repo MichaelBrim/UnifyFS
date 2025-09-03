@@ -835,11 +835,11 @@ DEFINE_MARGO_RPC_HANDLER(add_extents_rpc)
  *************************************************************************/
 
 /* Lookup extent locations for target file */
-int unifyfs_invoke_find_extents_rpc(int gfid,
-                                    unsigned int num_extents,
-                                    unifyfs_extent_t* extents,
-                                    unsigned int* num_chunks,
-                                    unifyfs_data_chunk_t** chunks)
+int unifyfs_find_extent_chunks(int gfid,
+                               unsigned int num_extents,
+                               unifyfs_extent_t* extents,
+                               unsigned int* num_chunks,
+                               unifyfs_data_chunk_t** chunks)
 {
     if ((NULL == num_chunks) || (NULL == chunks)) {
         return EINVAL;
@@ -855,186 +855,184 @@ int unifyfs_invoke_find_extents_rpc(int gfid,
     int ret = sm_get_fileattr(gfid, &attrs);
     if (ret == UNIFYFS_SUCCESS) {
         int file_laminated = (attrs.is_shared && attrs.is_laminated);
-        if (is_owner || use_server_local_extents || file_laminated) {
-            /* try local lookup */
-            int full_coverage = 0;
-            ret = sm_find_extents(gfid, (size_t)num_extents, extents,
-                                  num_chunks, chunks, &full_coverage);
-            if (ret) {
-                LOGERR("failed to find extents for gfid=%d (ret=%d)",
+        if (!(is_owner || use_server_local_extents || file_laminated)) {
+            /* send request for updated extents to owner */
+            struct timespec ts = (struct timespec) {0}; // MJB TODO - get extents cache stamp
+            ret = unifyfs_invoke_get_extents_rpc(gfid, &ts);
+            if (ret != UNIFYFS_SUCCESS) {
+                LOGERR("request to get extents for gfid=%d failed (ret=%d)",
                        gfid, ret);
-            } else if (0 == *num_chunks) { /* found no data */
-                LOGDBG("local lookup found no matching chunks");
-            } else { /* found some chunks */
-                if (full_coverage) {
-                    LOGDBG("local lookup found chunks with full coverage");
-                } else {
-                    LOGDBG("local lookup found chunks with partial coverage");
-                }
-            }
-            if (is_owner || file_laminated || full_coverage) {
-                return ret;
-            }
-            /* else, fall through to owner lookup */
-            if (*num_chunks > 0) {
-                /* release local results */
-                *num_chunks = 0;
-                free(*chunks);
-                *chunks = NULL;
             }
         }
     }
 
-    /* forward request to file owner */
-    p2p_request preq;
-    margo_instance_id mid = unifyfsd_rpc_context->svr_mid;
-    int rc = init_p2p_request(UNIFYFS_SERVER_RPC_EXTENTS_FIND,
-                              owner_rank, gfid, &preq);
-    if (rc != UNIFYFS_SUCCESS) {
-        return rc;
-    }
-    assert(preq.req_state != NULL);
-    find_extents_in_t*  in  = preq.req_state->inputs;
-    find_extents_out_t* out = preq.req_state->outputs;
-
-    /* create a margo bulk transfer handle for extents array */
-    hg_bulk_t bulk_req_handle;
-    void* buf = (void*) extents;
-    size_t buf_sz = (size_t)num_extents * sizeof(unifyfs_extent_t);
-    hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
-                                         HG_BULK_READ_ONLY, &bulk_req_handle);
-    if (hret != HG_SUCCESS) {
-        LOGERR("margo_bulk_create() failed - %s", HG_Error_to_string(hret));
-        cleanup_p2p_request(&preq);
-        return UNIFYFS_ERROR_MARGO;
-    }
-
-    /* fill rpc input struct and forward request */
-    in->src_rank    = (int32_t) glb_pmi_rank;
-    in->gfid        = (int32_t) gfid;
-    in->num_extents = (int32_t) num_extents;
-    in->extents     = bulk_req_handle;
-    rc = forward_p2p_request(&preq);
-    if (rc != UNIFYFS_SUCCESS) {
-        cleanup_p2p_request(&preq);
-        return rc;
-    }
-    margo_bulk_free(bulk_req_handle);
-
-    /* wait for request completion */
-    rc = wait_for_p2p_request(&preq);
-    if (rc != UNIFYFS_SUCCESS) {
-        cleanup_p2p_request(&preq);
-        return rc;
-    }
-
-    /* get the result of the rpc */
-    ret = out->ret;
-    if (ret == UNIFYFS_SUCCESS) {
-        /* get number of chunks */
-        unsigned int n_chks = (unsigned int) out->num_locations;
-        if (n_chks > 0) {
-            /* get bulk buffer with chunk locations */
-            buf_sz = (size_t)n_chks * sizeof(unifyfs_data_chunk_t);
-            buf = pull_margo_bulk(preq.req_state->handle, out->locations,
-                                  buf_sz, NULL);
-            if (NULL == buf) {
-                LOGERR("failed to pull chunk locations");
-                ret = UNIFYFS_ERROR_MARGO;
-            } else {
-                /* lookup requested extents */
-                LOGDBG("received %u chunk locations for gfid=%d",
-                       n_chks, gfid);
-                *chunks = (unifyfs_data_chunk_t*) buf;
-                *num_chunks = (unsigned int) n_chks;
-            }
+    /* now do local lookup */
+    int full_coverage = 0;
+    ret = sm_find_extents(gfid, (size_t)num_extents, extents,
+                          num_chunks, chunks, &full_coverage);
+    if (ret) {
+        LOGERR("failed to find extents for gfid=%d (ret=%d)",
+               gfid, ret);
+    } else if (0 == *num_chunks) { /* found no data */
+        LOGDBG("local lookup found no matching chunks");
+    } else { /* found some chunks */
+        if (full_coverage) {
+            LOGDBG("local lookup found chunks with full coverage");
+        } else {
+            LOGDBG("local lookup found chunks with partial coverage");
         }
     }
-    cleanup_p2p_request(&preq);
 
     return ret;
 }
 
-static void process_find_extents_rpc(server_rpc_req_t* sreq)
+/* Lookup extent locations for target file */
+int unifyfs_invoke_get_extents_rpc(int gfid,
+                                   struct timespec* timestamp)
+{
+    if (NULL == timestamp) {
+        return EINVAL;
+    }
+
+    int ret;
+    int owner_rank = hash_gfid_to_server(gfid);
+    int is_owner = (owner_rank == glb_pmi_rank);
+    if (!is_owner) {
+        /* forward request to file owner */
+        p2p_request preq;
+        int rc = init_p2p_request(UNIFYFS_SERVER_RPC_EXTENTS_GET,
+                                  owner_rank, gfid, &preq);
+        if (rc != UNIFYFS_SUCCESS) {
+            return rc;
+        }
+        assert(preq.req_state != NULL);
+        get_extents_in_t*  in  = preq.req_state->inputs;
+        get_extents_out_t* out = preq.req_state->outputs;
+
+        /* fill rpc input struct and forward request */
+        in->src_rank = (int32_t) glb_pmi_rank;
+        in->gfid     = (int32_t) gfid;
+        in->src_timestamp = *timestamp;
+        rc = forward_p2p_request(&preq);
+        if (rc != UNIFYFS_SUCCESS) {
+            cleanup_p2p_request(&preq);
+            return rc;
+        }
+
+        /* wait for request completion */
+        rc = wait_for_p2p_request(&preq);
+        if (rc != UNIFYFS_SUCCESS) {
+            cleanup_p2p_request(&preq);
+            return rc;
+        }
+
+        /* get the result of the rpc */
+        ret = out->ret;
+        if (ret == UNIFYFS_SUCCESS) {
+            /* get number of extents */
+            unsigned int n_ext = (unsigned int) out->num_extents;
+            if (n_ext > 0) {
+                /* get bulk buffer with extent locations */
+                size_t buf_sz = (size_t)n_ext * sizeof(extent_metadata);
+                void* buf = pull_margo_bulk(preq.req_state->handle, out->extents,
+                                            buf_sz, NULL);
+                if (NULL == buf) {
+                    LOGERR("failed to pull extent metadata array");
+                    ret = UNIFYFS_ERROR_MARGO;
+                } else {
+                    /* replace local cache with received extents */
+                    extent_metadata* em_arr = (extent_metadata*) buf;
+                    struct timespec owner_stamp = (struct timespec) out->owner_timestamp;
+                    ret = unifyfs_inode_cache_extents(gfid, (int) n_ext, em_arr,
+                                                      &owner_stamp);
+                }
+            }
+        }
+        cleanup_p2p_request(&preq);
+    } else {
+        ret = UNIFYFS_SUCCESS;
+        LOGDBG("I am owner (rank=%d) for gfid=%d", owner_rank, gfid);
+    }
+
+    return ret;
+}
+
+static void process_get_extents_rpc(server_rpc_req_t* sreq)
 {
     int ret;
     hg_bulk_t bulk_resp_handle = HG_BULK_NULL;
-    unsigned int num_chunks = 0;
-    
-    const char* rpc_name = "find_extents";
-    find_extents_in_t* in = sreq->req_state->inputs;
-    find_extents_out_t* out = sreq->req_state->outputs;
+    size_t num_extents = 0;
+    extent_metadata* extents = NULL;
+    struct timespec owner_stamp = (struct timespec) {0};
+
+    const char* rpc_name = "get_extents";
+    get_extents_in_t* in = sreq->req_state->inputs;
+    get_extents_out_t* out = sreq->req_state->outputs;
     assert((in != NULL) && (out != NULL));
 
     /* get input parameters */
     int sender = (int) in->src_rank;
     int gfid = (int) in->gfid;
-    size_t num_extents = (size_t) in->num_extents;
     
-    /* allocate and pull bulk extents */
-    size_t bulk_sz = num_extents * sizeof(unifyfs_extent_t);
-    void* bulk_buf = pull_margo_bulk(sreq->req_state->handle,
-                                   in->extents, bulk_sz, NULL);
-    if (NULL == bulk_buf) {
-        LOGERR("failed to pull extents");
-        ret = UNIFYFS_ERROR_MARGO;
-    } else {
-        unifyfs_extent_t* extents = (unifyfs_extent_t*) bulk_buf;
-        LOGDBG("received %zu extent lookups for gfid=%d from server[%d]",
-               num_extents, gfid, sender);
+    // MJB TODO - compare source timestamp to owner's and either
+    //            (a) bcast extents if source is zero, or
+    //            (b) return extents if source is older than owner
+    //struct timespec src_stamp = (struct timespec) in->src_timestamp;
 
-        /* find chunks for given extents */
-        int full_coverage = 0;
-        
-        unifyfs_data_chunk_t* chunk_locs = NULL;
-        ret = sm_find_extents(gfid, num_extents, extents,
-                              &num_chunks, &chunk_locs, &full_coverage);
+    int owner_rank = hash_gfid_to_server(gfid);
+    if (owner_rank == glb_pmi_rank) {
+        ret = unifyfs_inode_get_extents(gfid, &num_extents, &extents, &owner_stamp);
         if (ret == UNIFYFS_SUCCESS) {
-            /* define a bulk handle to transfer chunk address info */
-            if (num_chunks > 0) {
+            /* define a bulk handle to transfer extent_metadata array */
+            if (num_extents > 0) {
                 margo_instance_id mid =
                     margo_hg_handle_get_instance(sreq->req_state->handle);
                 assert(mid != MARGO_INSTANCE_NULL);
 
-                void* buf = (void*) chunk_locs;
-                size_t buf_sz = (size_t)num_chunks * sizeof(unifyfs_data_chunk_t);
+                void* buf = (void*) extents;
+                size_t buf_sz = num_extents * sizeof(extent_metadata);
                 hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
                                                      HG_BULK_READ_ONLY,
                                                      &bulk_resp_handle);
                 if (hret != HG_SUCCESS) {
                     LOGERR("margo_bulk_create() failed - %s",
-                           HG_Error_to_string(hret));
+                        HG_Error_to_string(hret));
                     ret = UNIFYFS_ERROR_MARGO;
                 } else {
                     /* set request output bulk for auto-free at cleanup */
                     sreq->req_state->bulk = bulk_resp_handle;
+                    LOGDBG("returning %zu extents for gfid=%d to rank=%d",
+                           num_extents, gfid, sender);
                 }
             }
         }
-    
-        free(bulk_buf);
+    } else {
+        LOGERR("get_extents request to non-owner rank=%d (gfid=%d, owner=%d)",
+               glb_pmi_rank, gfid, owner_rank);
+        ret = UNIFYFS_FAILURE;
     }
 
-    out->ret           = (int32_t) ret;
-    out->num_locations = (int32_t) num_chunks;
-    out->locations     = bulk_resp_handle;
+    out->ret         = (int32_t) ret;
+    out->num_extents = (int32_t) num_extents;
+    out->extents     = bulk_resp_handle;
+    out->owner_timestamp = owner_stamp;
 
     /* send rpc response and cleanup request state */
     sync_respond_server(sreq, rpc_name);
 }
 
-/* find extents rpc handler */
-static void find_extents_rpc(hg_handle_t handle)
+/* get extents rpc handler */
+static void get_extents_rpc(hg_handle_t handle)
 {
-    LOGDBG("find_extents rpc handler");
+    LOGDBG("get_extents rpc handler");
 
     /* create client rpc state */
     server_rpc_req_t* sreq =
-        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_EXTENTS_FIND, handle,
-                                  sizeof(find_extents_in_t),
-                                  sizeof(find_extents_out_t));
+        allocate_server_rpc_state(UNIFYFS_SERVER_RPC_EXTENTS_GET, handle,
+                                  sizeof(get_extents_in_t),
+                                  sizeof(get_extents_out_t));
     if (NULL == sreq) {
-        find_extents_out_t out;
+        get_extents_out_t out;
         out.ret = (int32_t) ENOMEM;
         hg_return_t hret = margo_respond(handle, &out);
         if (hret != HG_SUCCESS) {
@@ -1042,9 +1040,9 @@ static void find_extents_rpc(hg_handle_t handle)
         }
         return;
     }
-    process_find_extents_rpc(sreq);
+    process_get_extents_rpc(sreq);
 }
-DEFINE_MARGO_RPC_HANDLER(find_extents_rpc)
+DEFINE_MARGO_RPC_HANDLER(get_extents_rpc)
 
 
 /*************************************************************************

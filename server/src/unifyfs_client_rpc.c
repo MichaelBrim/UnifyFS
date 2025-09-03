@@ -806,96 +806,14 @@ void process_client_node_local_extents_rpc(client_rpc_req_t* creq)
     unifyfs_node_local_extents_get_out_t* out = creq->req_state->outputs;
     assert((in != NULL) && (out != NULL));
 
-    /* allocate buffer to hold array of read requests */
-    unifyfs_extent_t* extents = NULL;
-    size_t num_req = in->num_req;
-    hg_size_t bulk_size = in->bulk_size;
-    void* buffer = pull_margo_bulk(creq->req_state->handle,
-                                   in->bulk_data, bulk_size, NULL);
-    if (NULL == buffer) {
-        ret = UNIFYFS_ERROR_MARGO;
-    } else {
-        extents = (unifyfs_extent_t*) buffer;
-    }
-
-    chunk_list_t* elist_head = NULL;
-    chunk_list_t* elist_cur = NULL;
-    size_t total_chunks = 0;
-    if (num_req > 0 && (NULL != extents)) {
-        /* find chunks for each input extent */
-        elist_head = calloc(1, sizeof(chunk_list_t));
-        elist_cur = elist_head;
-        bool grow_list = false;
-        for (int i=0; i < num_req; ++i) {
-            LOGDBG("getting node local extent for gfid=%d",
-                   extents[i].gfid);
-            unsigned int n_chunks = 0;
-            unifyfs_data_chunk_t* chunks = NULL;
-            int rc = unifyfs_invoke_find_extents_rpc(extents[i].gfid, 1,
-                                                     &extents[i],
-                                                     &n_chunks, &chunks);
-            if (0 == rc) {
-                if (grow_list) {
-                    elist_cur->next = calloc(1, sizeof(chunk_list_t));
-                    elist_cur = elist_cur->next;
-                }
-                for (int j = 0; j < n_chunks; ++j) {
-                    elist_cur->chunk = chunks[j];
-                    if (j < n_chunks - 1) {
-                        elist_cur->next = calloc(1, sizeof(chunk_list_t));
-                        elist_cur = elist_cur->next;
-                    } else {
-                        elist_cur->next = NULL;
-                    }
-                }
-                grow_list = true;
-                total_chunks += n_chunks;
-                free(chunks);
-            }
-        }
-        free(extents);
-    }
-    
-    unifyfs_data_chunk_t* chunks_buffer = NULL;
-    size_t chunks_size = total_chunks * sizeof(unifyfs_data_chunk_t);
-    if (total_chunks > 0) {
-        /* convert intermediate list to array of unifyfs_data_chunk_t */
-        chunks_buffer = calloc(1, chunks_size);
-        elist_cur = elist_head;
-        for (int i = 0; i < total_chunks; ++i) {
-            chunks_buffer[i] = elist_cur->chunk;
-            chunk_list_t* elist_tmp = elist_cur;
-            elist_cur = elist_cur->next;
-            free(elist_tmp);
-        }
-
-        hg_bulk_t bulk_extents;
-        hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->shm_mid, 1,
-                                             (void**) &chunks_buffer,
-                                             &chunks_size,
-                                             HG_BULK_READ_ONLY, &bulk_extents);
-        if (hret == HG_SUCCESS) {
-            out->chunk_count = total_chunks;
-            out->bulk_size = chunks_size;
-            out->bulk_data = bulk_extents;
-            creq->req_state->bulk = bulk_extents;
-        } else {
-            LOGDBG("margo_bulk_create() failed - %s",
-                   HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
-            out->chunk_count = 0;
-            out->bulk_size = 0;
-            out->bulk_data = HG_BULK_NULL;
-        }
-    }
+    /* MJB TODO - rewrite to take a single gfid and return the local extents
+     *            if the file is laminated and has not been reverse-synced */
+    ret = UNIFYFS_ERROR_NYI;
 
     out->ret = (int32_t) ret;
 
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
-    
-    if (NULL != chunks_buffer)
-        free(chunks_buffer);
 }
 
 /* BEGIN MARGO CLIENT-SERVER RPC HANDLER FUNCTIONS */

@@ -118,8 +118,7 @@ int invoke_client_unlink_rpc(unifyfs_client* client,
                              int gfid);
 
 int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
-                                             int num_req,
-                                             chunk_list_t* read_req,
+                                             int gfid,
                                              size_t* extent_count,
                                              unifyfs_data_chunk_t** extents);
 

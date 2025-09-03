@@ -333,8 +333,8 @@ int submit_read_request(unifyfs_fops_ctx_t* ctx,
         unifyfs_extent_t* ext = extents + extent_ndx;
         unsigned int n_chunks = 0;
         unifyfs_data_chunk_t* chunks = NULL;
-        int rc = unifyfs_invoke_find_extents_rpc(ext->gfid, 1, ext,
-                                                 &n_chunks, &chunks);
+        int rc = unifyfs_find_extent_chunks(ext->gfid, 1, ext,
+                                            &n_chunks, &chunks);
         if (rc) {
             LOGERR("failed to find extent locations");
             return rc;
@@ -398,8 +398,8 @@ int rpc_read(unifyfs_fops_ctx_t* ctx,
     /* get array of data chunks for target file extent */
     unsigned int n_chunks = 0;
     unifyfs_data_chunk_t* chunks = NULL;
-    int rc = unifyfs_invoke_find_extents_rpc(gfid, 1, &ext,
-                                             &n_chunks, &chunks);
+    int rc = unifyfs_find_extent_chunks(gfid, 1, &ext,
+                                        &n_chunks, &chunks);
     if (rc) {
         LOGERR("failed to find extent chunk locations");
         return rc;

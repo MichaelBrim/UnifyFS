@@ -678,13 +678,19 @@ int process_gfid_reads(unifyfs_client* client,
     read_req_t* reqs = NULL;
     
     if (client->use_node_local_extents) {
-        int fid, rc;
+        int gfid, fid, rc;
+        int last_gfid = -1;
         unifyfs_filemeta_t* meta;
-        chunk_list_t* list = calloc(1, sizeof(chunk_list_t));
-        chunk_list_t* cur = list;
-        int num_request_selected = 0;
         for (int i = 0; i < in_count; ++i) {
-            fid = unifyfs_fid_from_gfid(client, in_reqs[i].gfid);
+            gfid = in_reqs[i].gfid;
+            if (last_gfid == gfid) {
+                // already processed
+                continue;
+            } else {
+                last_gfid = gfid;
+            }
+
+            fid = unifyfs_fid_from_gfid(client, gfid);
             meta = unifyfs_get_meta_from_fid(client, fid);
             if (meta != NULL) {
                 if (!meta->attrs.is_laminated || !meta->needs_reads_sync) {
@@ -692,38 +698,19 @@ int process_gfid_reads(unifyfs_client* client,
                      * laminated, or has already been synced from server */
                     continue;
                 }
-                meta->needs_reads_sync = 0;
-                num_request_selected++;
 
-                // laminated file attributes include accurate file size
-                cur->chunk.file_offset = 0;
-                cur->chunk.length = (size_t) meta->attrs.size;
-                cur->chunk.gfid = in_reqs[i].gfid;
-                if (i < in_count - 1) {
-                    cur->next = calloc(1, sizeof(chunk_list_t));
-                    cur->next->next = NULL;
-                    cur = cur->next;
-                } else {
-                    cur->next = NULL;
-                }
-            }
-        }
-        if (num_request_selected > 0) {
-            /* There are files which are laminated and
-             * require reverse sync of local extents */
-            size_t chunk_count = 0;
-            unifyfs_data_chunk_t* chunks = NULL;
-            rc = invoke_client_node_local_extents_get_rpc(client,
-                                                          num_request_selected,
-                                                          list,
-                                                          &chunk_count,
-                                                          &chunks);
-            if ((rc == UNIFYFS_SUCCESS) && (chunk_count != 0)) {
-                for (int j = 0; j < chunk_count; ++j) {
-                    if (chunks[j].log_app_id == client->state.app_id) {
-                        fid = unifyfs_fid_from_gfid(client, chunks[j].gfid);
-                        meta = unifyfs_get_meta_from_fid(client, fid);
-                        if (meta != NULL) {
+                meta->needs_reads_sync = 0;
+
+                /* MJB TODO - rewrite to request local extents for single gfid */
+                size_t chunk_count = 0;
+                unifyfs_data_chunk_t* chunks = NULL;
+                rc = invoke_client_node_local_extents_get_rpc(client,
+                                                              gfid,
+                                                              &chunk_count,
+                                                              &chunks);
+                if (rc == UNIFYFS_SUCCESS) {
+                    for (int j = 0; j < chunk_count; ++j) {
+                        if (chunks[j].log_app_id == client->state.app_id) {
                             unsigned long start = chunks[j].file_offset;
                             unsigned long end = start + chunks[j].length - 1;
                             unsigned long pos = chunks[j].log_offset;
@@ -731,10 +718,10 @@ int process_gfid_reads(unifyfs_client* client,
                                          chunks[j].log_client_id);
                         }
                     }
+                    if (chunks != NULL) {
+                        free(chunks);
+                    }
                 }
-            }
-            if (chunks != NULL) {
-                free(chunks);
             }
         }
     }

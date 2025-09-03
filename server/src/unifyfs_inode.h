@@ -36,6 +36,10 @@ struct unifyfs_inode {
     struct extent_tree* extents;  /* extent information */
     arraylist_t* pending_extents; /* list of pending_extents_item */
 
+    extent_metadata* extents_cache; /* cached serialized array of extents */
+    size_t extents_cache_count;     /* number of entries in cached array */
+    struct timespec cache_time;     /* mtime of file at last cache update */
+
     ABT_rwlock rwlock;            /* reader-writer lock */
 };
 
@@ -119,15 +123,17 @@ int unifyfs_inode_truncate(int gfid, unsigned long size);
 /**
  * @brief get the local extent array from the target inode
  *
- * @param gfid     the global file identifier
- * @param n        pointer to size of the extents array
- * @param extents  pointer to extents array (caller should free)
+ * @param gfid       the global file identifier
+ * @param n          pointer to size of the extents array
+ * @param extents    pointer to extents array (caller should free)
+ * @param timestamp  pointer to struct timespec to fill with mtime
  *
  * @return 0 on success, errno otherwise
  */
 int unifyfs_inode_get_extents(int gfid,
                               size_t* n,
-                              extent_metadata** extents);
+                              extent_metadata** extents,
+                              struct timespec* timestamp);
 
 /**
  * @brief add extents pending sync to the inode
@@ -178,6 +184,21 @@ int unifyfs_inode_get_pending_extents(int gfid,
 int unifyfs_inode_add_extents(int gfid,
                               int num_extents,
                               extent_metadata* extents);
+
+/**
+ * @brief cache extents in inode
+ *
+ * @param gfid          the global file identifier
+ * @param num_extents   the number of extents in @extents
+ * @param extents       an array of extents to be added
+ * @param cache_time    timestamp associated with source cache at owner
+ *
+ * @return 0 on success, errno otherwise
+ */
+int unifyfs_inode_cache_extents(int gfid,
+                                int num_extents,
+                                extent_metadata* extents,
+                                struct timespec* cache_time);
 
 /**
  * @brief get the maximum file size from the local extent tree of given file
