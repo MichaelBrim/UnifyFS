@@ -1119,7 +1119,7 @@ int unifyfs_invoke_broadcast_extents(int gfid)
             coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
                                      glb_pmi_rank, (void*)in,
                                      NULL, sizeof(extent_bcast_out_t),
-                                     HG_BULK_NULL, extents_bulk, buf);
+                                     HG_BULK_NULL, extents_bulk, NULL);
             if (NULL == coll) {
                 ret = ENOMEM;
             } else {
@@ -1128,12 +1128,6 @@ int unifyfs_invoke_broadcast_extents(int gfid)
                     ret = invoke_bcast_progress_rpc(coll);
                 }
             }
-        }
-    }
-
-    if (ret != UNIFYFS_SUCCESS) {
-        if (NULL != extents) {
-            free(extents);
         }
     }
 
@@ -1267,7 +1261,7 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
             coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
                                      glb_pmi_rank, (void*)in,
                                      NULL, sizeof(extent_cache_bcast_out_t),
-                                     HG_BULK_NULL, extents_bulk, buf);
+                                     HG_BULK_NULL, extents_bulk, NULL);
             if (NULL == coll) {
                 ret = ENOMEM;
             } else {
@@ -1276,12 +1270,6 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
                     ret = invoke_bcast_progress_rpc(coll);
                 }
             }
-        }
-    }
-
-    if (ret != UNIFYFS_SUCCESS) {
-        if (NULL != extents) {
-            free(extents);
         }
     }
 
@@ -1508,7 +1496,6 @@ int unifyfs_invoke_broadcast_laminate(int gfid)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_bulk_create() failed - %s",
                    HG_Error_to_string(hret));
-            free(buf);
             return UNIFYFS_ERROR_MARGO;
         }
     }
@@ -1530,7 +1517,7 @@ int unifyfs_invoke_broadcast_laminate(int gfid)
         coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
                                  glb_pmi_rank, (void*)in,
                                  NULL, sizeof(laminate_bcast_out_t),
-                                 HG_BULK_NULL, extents_bulk, extents);
+                                 HG_BULK_NULL, extents_bulk, NULL);
         if (NULL == coll) {
             ret = ENOMEM;
         } else {
@@ -1538,12 +1525,6 @@ int unifyfs_invoke_broadcast_laminate(int gfid)
             if (ret == UNIFYFS_SUCCESS) {
                 ret = invoke_bcast_progress_rpc(coll);
             }
-        }
-    }
-
-    if (ret != UNIFYFS_SUCCESS) {
-        if (NULL != extents) {
-            free(extents);
         }
     }
 

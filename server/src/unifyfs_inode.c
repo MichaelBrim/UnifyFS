@@ -662,11 +662,7 @@ int unifyfs_inode_get_extents(int gfid,
 
                     *n = n_extents;
                     *extents = extarr;
-
-                    if (n_extents > ino->extents_cache_count) {
-                        // update cache if number of extents has increased
-                        update_cache = 1;
-                    }
+                    update_cache = 1;
                 }
             }
             if (NULL != timestamp) {
@@ -682,16 +678,11 @@ int unifyfs_inode_get_extents(int gfid,
                     ino->extents_cache_count = 0;
                     free(ino->extents_cache);
                 }
-                ino->extents_cache = calloc(n_extents,
-                                            sizeof(extent_metadata));
-                if (ino->extents_cache != NULL) {
-                    memcpy(ino->extents_cache, extarr,
-                           n_extents*sizeof(extent_metadata));
-                    ino->extents_cache_count = n_extents;
-                    ino->cache_time = ino->attr.mtime;
-                    if (NULL != timestamp) {
-                        *timestamp = ino->cache_time;
-                    }
+                ino->extents_cache = extarr;
+                ino->extents_cache_count = n_extents;
+                ino->cache_time = ino->attr.mtime;
+                if (NULL != timestamp) {
+                    *timestamp = ino->cache_time;
                 }
             }
             unifyfs_inode_unlock(ino);

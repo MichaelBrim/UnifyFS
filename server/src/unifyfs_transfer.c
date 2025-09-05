@@ -161,10 +161,6 @@ int create_local_transfers(int gfid,
 
             tta->local_extents = local_extents;
         }
-
-        if (NULL != extents) {
-            free(extents);
-        }
     }
 
     tta->n_extents     = n_local_extents;
