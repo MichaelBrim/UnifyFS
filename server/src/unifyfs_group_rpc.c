@@ -718,7 +718,7 @@ void collective_set_local_retval(coll_request* coll_req, int val)
         ecbo->ret = val;
         break;
     }
-    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_INVALIDATE: {
+    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE: {
         invalidate_extent_cache_bcast_out_t* iecbo = (invalidate_extent_cache_bcast_out_t*) output;
         iecbo->ret = val;
         break;
