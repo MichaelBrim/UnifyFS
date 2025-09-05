@@ -941,6 +941,7 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         clock_gettime(CLOCK_REALTIME, &timeout);
         timeout.tv_sec += 5;
         ABT_mutex_lock(preq->pending_sync);
+        LOGDBG("waiting on pending get_extents condition for preq(%p)", preq);
         rc = ABT_cond_timedwait(preq->pending_cond, preq->pending_sync,
                                 &timeout);
         if (ABT_ERR_COND_TIMEDOUT == rc) {
@@ -949,6 +950,9 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         } else if (rc) {
             LOGERR("failed to wait on condition (err=%d)", rc);
             ret = UNIFYFS_ERROR_MARGO;
+        } else {
+            LOGDBG("pending get_extents condition  for preq(%p) was signaled",
+                   preq);
         }
         ABT_mutex_unlock(preq->pending_sync);
         return ret;
@@ -981,7 +985,7 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
     if (ret == UNIFYFS_SUCCESS) {
         /* get number of extents */
         unsigned int n_ext = (unsigned int) out->num_extents;
-        if (n_ext > 0) {
+        if ((n_ext > 0) && (out->extents != HG_BULK_NULL)) {
             /* get bulk buffer with extent locations */
             size_t buf_sz = (size_t)n_ext * sizeof(extent_metadata);
             void* buf = pull_margo_bulk(preq->req_state->handle,
