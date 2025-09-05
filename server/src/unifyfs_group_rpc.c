@@ -313,6 +313,24 @@ static int get_child_response(coll_request* coll_req,
                 }
                 break;
             }
+            case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE: {
+                extent_cache_bcast_out_t* cecbo = (extent_cache_bcast_out_t*) out;
+                extent_cache_bcast_out_t* ecbo  = (extent_cache_bcast_out_t*) output;
+                child_ret = cecbo->ret;
+                if ((NULL != ecbo) && (child_ret != UNIFYFS_SUCCESS)) {
+                    ecbo->ret = child_ret;
+                }
+                break;
+            }
+            case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE_INVALIDATE: {
+                invalidate_extent_cache_bcast_out_t* ciecbo = (invalidate_extent_cache_bcast_out_t*) out;
+                invalidate_extent_cache_bcast_out_t* iecbo  = (invalidate_extent_cache_bcast_out_t*) output;
+                child_ret = ciecbo->ret;
+                if ((NULL != iecbo) && (child_ret != UNIFYFS_SUCCESS)) {
+                    iecbo->ret = child_ret;
+                }
+                break;
+            }
             case UNIFYFS_SERVER_BCAST_RPC_FILEATTR: {
                 fileattr_bcast_out_t* cfbo = (fileattr_bcast_out_t*) out;
                 fileattr_bcast_out_t* fbo  = (fileattr_bcast_out_t*) output;
@@ -572,6 +590,11 @@ static void coll_restore_input_bulk(coll_request* coll_req)
     case UNIFYFS_SERVER_BCAST_RPC_EXTENTS: {
         extent_bcast_in_t* ebi = (extent_bcast_in_t*) input;
         ebi->extents = coll_req->bulk_in;
+        break;
+    }
+    case UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE: {
+        extent_cache_bcast_in_t* ecbi = (extent_cache_bcast_in_t*) input;
+        ecbi->extents = coll_req->bulk_in;
         break;
     }
     case UNIFYFS_SERVER_BCAST_RPC_LAMINATE: {
