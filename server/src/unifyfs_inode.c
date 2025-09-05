@@ -643,7 +643,6 @@ int unifyfs_inode_get_extents(int gfid,
     } else {
         extent_metadata* extarr = NULL;
         size_t n_extents = 0;
-        int update_cache = 0;
         unifyfs_inode_wrlock(ino);
         {
             if ((NULL != ino->extents_cache) &&

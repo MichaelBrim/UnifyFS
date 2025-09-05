@@ -1035,7 +1035,7 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
     int send_extents = 0;
     int owner_rank = hash_gfid_to_server(gfid);
     if (owner_rank == glb_pmi_rank) {
-        ret = unifyfs_inode_get_extents(gfid, &num_extents, &extents,
+        ret = unifyfs_inode_get_extents(gfid, 0, &num_extents, &extents,
                                         &owner_stamp);
         if (ret == UNIFYFS_SUCCESS) {
             /* Compare source timestamp to owner's and do:
