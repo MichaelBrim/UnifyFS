@@ -540,14 +540,39 @@ int unifyfs_inode_cache_extents(int gfid,
     int ret = UNIFYFS_SUCCESS;
     unifyfs_inode_wrlock(ino);
     {
-        invalidate_extents_cache(ino);
-        if (num_extents > 0) {
-            ino->extents_cache = extents;
-            ino->extents_cache_count = num_extents;
-            ino->cache_time = *cache_time;
-            LOGINFO("cached %d extents to inode (gfid=%d)",
-                    num_extents, gfid);
+        if (0 != compare_timespec(cache_time, &(ino->cache_time))) {
+            invalidate_extents_cache(ino);
+            if (num_extents > 0) {
+                ino->extents_cache = extents;
+                ino->extents_cache_count = num_extents;
+                ino->cache_time = *cache_time;
+                LOGINFO("cached %d extents to inode (gfid=%d)",
+                        num_extents, gfid);
+            }
+        } else {
+            LOGDBG("local cache time for gfid=%d already matches", gfid);
+            if (NULL != extents) {
+                free(extents);
+            }
         }
+    }
+    unifyfs_inode_unlock(ino);
+
+    return ret;
+}
+
+int unifyfs_inode_get_cache_time(int gfid,
+                                 struct timespec* cache_time)
+{
+    struct unifyfs_inode* ino = unifyfs_inode_lookup(gfid);
+    if (NULL == ino) {
+        return ENOENT;
+    }
+
+    int ret = UNIFYFS_SUCCESS;
+    unifyfs_inode_rdlock(ino);
+    {
+        *cache_time = ino->cache_time;
     }
     unifyfs_inode_unlock(ino);
 
@@ -664,12 +689,85 @@ int unifyfs_inode_get_extents(int gfid,
                            n_extents*sizeof(extent_metadata));
                     ino->extents_cache_count = n_extents;
                     ino->cache_time = ino->attr.mtime;
+                    if (NULL != timestamp) {
+                        *timestamp = ino->cache_time;
+                    }
                 }
             }
             unifyfs_inode_unlock(ino);
         }
     }
     return ret;
+}
+
+static
+int get_extent_cache_chunks(unifyfs_extent_t* extent,
+                            extent_metadata* cache,
+                            size_t cache_sz,
+                            unsigned int* n_chunks,
+                            unifyfs_data_chunk_t** chunks,
+                            int* full_coverage)
+{
+    *n_chunks = 0;
+    *chunks = NULL;
+    *full_coverage = 0;
+
+    unsigned long ext_len = (unsigned long) extent->length;
+    unsigned long ext_start_off = (unsigned long) extent->offset;
+    unsigned long ext_end_off = ext_start_off + ext_len - 1;
+    
+    /* search cache array for extents containing start and end offset */
+    extent_metadata* em_begin = NULL;
+    extent_metadata* em_end = NULL;
+    for (int i=0; i < (int)cache_sz; i++) {
+        extent_metadata* em = cache + i;
+        if ((NULL == em_begin) &&
+            (em->start <= ext_start_off) &&
+            (em->end >= ext_start_off)) {
+            em_begin = em;
+        }
+        if ((NULL == em_end) &&
+            (em->start <= ext_end_off) &&
+            (em->end >= ext_end_off)) {
+            em_end = em;
+            break;
+        }
+    }
+
+    if ((NULL != em_begin) && (NULL != em_end)) {
+        /* found begin and end extents, convert to chunks */
+        int gap_found = 0;
+        int n_chk = 1 + (em_end - em_begin);
+        unifyfs_data_chunk_t* chks = calloc(n_chk, sizeof(*chks));
+        if (NULL != chks) {
+            extent_metadata* em_prev;
+            extent_metadata* em_iter = em_begin;
+            unifyfs_data_chunk_t* chk_iter = chks;
+            do {
+                extent_to_chunk(ext_start_off, ext_len, em_iter, chk_iter);
+                if (em_iter == em_end)
+                    break;
+
+                chk_iter++;
+                em_prev = em_iter++;
+                if (!gap_found && ((em_prev->end + 1) != em_iter->start))
+                    gap_found = 1;
+            } while (1);
+
+            *n_chunks = n_chk;
+            *chunks = chks;
+            if (!gap_found)
+                *full_coverage = 1;
+
+            return UNIFYFS_SUCCESS;
+        } else {
+            LOGERR("failed to allocate data chunk array");
+            return ENOMEM;
+        }
+    } else {
+        LOGDBG("could not locate matching begin and end extents");
+    }
+    return UNIFYFS_FAILURE;
 }
 
 int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
@@ -689,7 +787,26 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
     } else {
         unifyfs_inode_rdlock(ino);
         {
-            if (NULL != ino->extents) {
+            /* use cache if present and within expiry threshold */
+            int done = 0;
+            if (NULL != ino->extents_cache) {
+                struct timespec now;
+                struct timespec cache_expire = ino->cache_time;
+                cache_expire.tv_sec += UNIFYFS_METADATA_CACHE_SECONDS;
+                clock_gettime(CLOCK_REALTIME, &now);
+                if (compare_timespec(&now, &cache_expire) <= 0) {
+                    ret = get_extent_cache_chunks(extent,
+                                                  ino->extents_cache,
+                                                  ino->extents_cache_count,
+                                                  n_chunks, chunks,
+                                                  &covered);
+                    if (UNIFYFS_SUCCESS == ret) {
+                        done = 1;
+                    }
+                }
+            }
+
+            if (!done && (NULL != ino->extents)) {
                 unsigned long offset = extent->offset;
                 unsigned long len    = extent->length;
                 ret = extent_tree_get_chunk_list(ino->extents, offset, len,
@@ -769,7 +886,7 @@ int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
     n_resolved = (unsigned int*) buf;
     resolved = (unifyfs_data_chunk_t**) &n_resolved[n_extents];
 
-    /* resolve chunks addresses for all requests from inode tree */
+    /* resolve chunks addresses for all requests */
     for (i = 0; i < n_extents; i++) {
         unifyfs_extent_t* current = &extents[i];
 

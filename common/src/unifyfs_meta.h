@@ -32,18 +32,10 @@
 extern "C" {
 #endif
 
-#ifndef UNIFYFS_METADATA_CACHE_SECONDS
-# define UNIFYFS_METADATA_CACHE_SECONDS 5
-#endif
 
 /* a valid gfid generated via MD5 hash will never be zero */
 #define INVALID_GFID (0)
 
-/* extent slice size used for metadata */
-extern size_t meta_slice_sz;
-
-/* calculate number of slices in an extent given by start offset and length */
-size_t meta_num_slices(size_t offset, size_t length);
 
 /* structure used to detect clients/servers colocated on a host */
 typedef struct {
@@ -366,6 +358,30 @@ int compare_name_rank_pair(const void* a, const void* b)
     if (0 == cmp) {
         /* if hostnames are the same, compare the rank */
         cmp = pair_a->rank - pair_b->rank;
+    }
+    return cmp;
+}
+
+/* qsort comparison function for struct timespec */
+static inline
+int compare_timespec(const void* a, const void* b)
+{
+    const struct timespec* ts_a = (const struct timespec*) a;
+    const struct timespec* ts_b = (const struct timespec*) b;
+
+    int cmp;
+    if (ts_a->tv_sec == ts_b->tv_sec) {
+        if (ts_a->tv_nsec == ts_b->tv_nsec) {
+            cmp = 0; // equal
+        } else if (ts_a->tv_nsec > ts_b->tv_nsec){
+            cmp = 1; // a is more recent
+        } else {
+            cmp = -1; // b is more recent
+        }
+    } else if (ts_a->tv_sec > ts_b->tv_sec) {
+        cmp = 1; // a is more recent
+    } else {
+        cmp = -1; // b is more recent
     }
     return cmp;
 }

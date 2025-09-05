@@ -560,8 +560,8 @@ int sm_cache_extents(int gfid,
         unsigned int n_extents = (unsigned int) num_extents;
         ret = unifyfs_inode_cache_extents(gfid, n_extents, extents, cache_time);
         if (ret) {
-            LOGERR("failed to cache %u extents to gfid=%d (rc=%d, is_owner=%d)",
-                   n_extents, gfid, ret, is_owner);
+            LOGERR("failed to cache %u extents to gfid=%d (rc=%d)",
+                   n_extents, gfid, ret);
         }
     }
     return ret;

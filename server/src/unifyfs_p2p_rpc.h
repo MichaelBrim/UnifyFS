@@ -37,6 +37,9 @@ typedef struct {
     /* client reqs dependent on this remote req (if any )*/
     client_rpc_req_t* client_req;     // for only one
     arraylist_t* pending_client_reqs; // for more than one
+
+    ABT_cond pending_cond; /* condition to signal upon pending completion */
+    ABT_mutex pending_sync; /* mutex for above condition variable */
 } p2p_request;
 
 /* helper method to initialize peer rpc request */
@@ -120,7 +123,8 @@ int unifyfs_invoke_add_extents_rpc(int gfid,
 
 
 /* Lookup extent locations for target file */
-int unifyfs_find_extent_chunks(int gfid,
+int unifyfs_find_extent_chunks(unifyfs_fops_ctx_t* ctx,
+                               int gfid,
                                unsigned int num_extents,
                                unifyfs_extent_t* extents,
                                unsigned int* num_chunks,

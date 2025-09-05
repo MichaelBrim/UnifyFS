@@ -67,7 +67,7 @@
 #define UNIFYFS_MARGO_SERVICE_TIMEOUT_MSEC 15000  /* 15 sec */
 
 // Metadata Default Values
-#define UNIFYFS_META_DEFAULT_SLICE_SZ MIB    /* data slice size for metadata */
+#define UNIFYFS_METADATA_CACHE_SECONDS 5 /* cached metadata valid for 5 sec */
 
 // Server
 #define UNIFYFS_SERVER_MAX_BULK_TX_SIZE (8 * MIB) /* to-server transmit size */

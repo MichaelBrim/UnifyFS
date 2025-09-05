@@ -546,11 +546,12 @@ unsigned long extent_tree_max_offset(struct extent_tree* tree)
     return max;
 }
 
-static void chunk_req_from_extent(
-    unsigned long req_offset,
-    unsigned long req_len,
-    extent_metadata* extent,
-    unifyfs_data_chunk_t* chunk)
+/* Based on requested extent (offset + len), fill chunk from given extent,
+ * including trimming unrequested data */
+void extent_to_chunk(unsigned long req_offset,
+                     unsigned long req_len,
+                     extent_metadata* extent,
+                     unifyfs_data_chunk_t* chunk)
 {
     unsigned long offset     = extent->start;
     unsigned long nbytes     = extent->end - extent->start + 1;
@@ -643,7 +644,7 @@ int extent_tree_get_chunk_list(
     while ((NULL != next) && (next->extent.start <= end)) {
         /* trim out the extent so it does not include the data that is not
          * requested */
-        chunk_req_from_extent(offset, len, &(next->extent), chunk);
+        extent_to_chunk(offset, len, &(next->extent), chunk);
 
         next = extent_tree_iter(tree, next);
         chunk += 1;

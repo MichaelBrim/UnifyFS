@@ -201,6 +201,18 @@ int unifyfs_inode_cache_extents(int gfid,
                                 struct timespec* cache_time);
 
 /**
+ * @brief get time we last cached extents in inode
+ *
+ * @param gfid               the global file identifier
+ *
+ * @param[out] cache_time    timestamp associated with cache
+ *
+ * @return 0 on success, errno otherwise
+ */
+int unifyfs_inode_get_cache_time(int gfid,
+                                 struct timespec* cache_time);
+
+/**
  * @brief get the maximum file size from the local extent tree of given file
  *
  * @param      gfid     global file identifier

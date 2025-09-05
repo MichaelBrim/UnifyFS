@@ -15,6 +15,7 @@
 #ifndef __EXTENT_TREE_H__
 #define __EXTENT_TREE_H__
 
+#include "unifyfs_meta.h"
 #include "unifyfs_global.h"
 
 typedef struct extent_metadata {
@@ -46,6 +47,13 @@ struct extent_tree {
     unsigned long count;     /* number of segments stored in tree */
     unsigned long max;       /* maximum logical offset value in the tree */
 };
+
+/* Based on requested extent (offset + len), fill chunk from given extent,
+ * including trimming unrequested data */
+void extent_to_chunk(unsigned long req_offset,
+                     unsigned long req_len,
+                     extent_metadata* extent,
+                     unifyfs_data_chunk_t* chunk);
 
 /* Returns 0 on success, positive non-zero error code otherwise */
 int extent_tree_init(struct extent_tree* tree);

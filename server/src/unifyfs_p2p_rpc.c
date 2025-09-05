@@ -57,6 +57,9 @@ int init_p2p_request(server_rpc_e request_op,
     preq->req_op = request_op;
     preq->gfid = gfid;
 
+    preq->pending_cond = ABT_COND_NULL;
+    preq->pending_sync = ABT_MUTEX_NULL;
+
     /* get address for specified server rank */
     preq->peer_rank = peer_rank;
     preq->peer = get_margo_server_address(peer_rank);
@@ -169,6 +172,13 @@ void cleanup_p2p_request(p2p_request* preq)
         arraylist_free(preq->pending_client_reqs);
         preq->pending_client_reqs = NULL;
     }
+
+    if (ABT_COND_NULL != preq->pending_cond) {
+        ABT_cond_free(&(preq->pending_cond));
+    }
+    if (ABT_MUTEX_NULL != preq->pending_sync) {
+        ABT_mutex_free(&(preq->pending_sync));
+    }
 }
 
 int add_pending_remote_request(int peer_rank,
@@ -206,36 +216,45 @@ int add_pending_remote_request(int peer_rank,
 
     ABT_mutex_lock(pending_remote_requests_abt_sync);
 
-    if (NULL != client_req) {
+    if ((NULL != client_req) && have_pending) {
         /* add client request to pending remote */
-        if (have_pending) {
-            if (NULL == preq->pending_client_reqs) {
-                /* create list */
-                int max_clients = UNIFYFS_SERVER_MAX_APP_CLIENTS;
-                preq->pending_client_reqs = arraylist_create(max_clients);
-            }
+        if (NULL == preq->pending_client_reqs) {
+            /* create list */
+            int max_clients = UNIFYFS_SERVER_MAX_APP_CLIENTS;
+            preq->pending_client_reqs = arraylist_create(max_clients);
+        }
 
-            /* add current pending client to list */
-            rc = arraylist_add(preq->pending_client_reqs, client_req);
-            if (-1 == rc) {
-                LOGERR("failed to add client req (%p) to pending list",
-                       client_req);
-                ABT_mutex_unlock(pending_remote_requests_abt_sync);
-                ret = rc;
-            }
+        /* add current pending client to list */
+        rc = arraylist_add(preq->pending_client_reqs, client_req);
+        if (-1 == rc) {
+            LOGERR("failed to add client req (%p) to pending list",
+                   client_req);
         }
     }
     
     if (allocated) {
+        if (NULL == client_req) {
+            /* not keeping client req list, use condition */
+            rc = ABT_mutex_create(&(preq->pending_sync));
+            if (ABT_SUCCESS != rc) {
+                LOGERR("ABT_mutex_create failed - rc=%d", rc);
+                ret = UNIFYFS_ERROR_MARGO;
+            } else {
+                rc = ABT_cond_create(&(preq->pending_cond));
+                if (ABT_SUCCESS != rc) {
+                    LOGERR("ABT_cond_create failed - rc=%d", rc);
+                    ABT_mutex_free(&(preq->pending_sync));
+                    ret = UNIFYFS_ERROR_MARGO;
+                }
+            }
+        }
+
         /* add new p2p_request to pending remotes list */
         rc = arraylist_add(pending_remote_requests, preq);
         if (rc == -1) {
             LOGERR("failed to add p2p req(%p) to remote_requests arraylist",
                    preq);
-            ABT_mutex_unlock(pending_remote_requests_abt_sync);
-            cleanup_p2p_request(preq);
-            free(preq);
-            ret = rc;
+            ret = UNIFYFS_FAILURE;
         }
     }
 
@@ -243,6 +262,9 @@ int add_pending_remote_request(int peer_rank,
 
     if ((ret == UNIFYFS_SUCCESS) || (ret == UNIFYFS_PENDING)) {
         *preqp = preq;
+    } else if (allocated) {
+        cleanup_p2p_request(preq);
+        free(preq);
     }
     return ret;
 }
@@ -835,7 +857,8 @@ DEFINE_MARGO_RPC_HANDLER(add_extents_rpc)
  *************************************************************************/
 
 /* Lookup extent locations for target file */
-int unifyfs_find_extent_chunks(int gfid,
+int unifyfs_find_extent_chunks(unifyfs_fops_ctx_t* ctx,
+                               int gfid,
                                unsigned int num_extents,
                                unifyfs_extent_t* extents,
                                unsigned int* num_chunks,
@@ -857,7 +880,11 @@ int unifyfs_find_extent_chunks(int gfid,
         int file_laminated = (attrs.is_shared && attrs.is_laminated);
         if (!(is_owner || use_server_local_extents || file_laminated)) {
             /* send request for updated extents to owner */
-            struct timespec ts = (struct timespec) {0}; // MJB TODO - get extents cache stamp
+            struct timespec ts;
+            ret = unifyfs_inode_get_cache_time(gfid, &ts);
+            if (UNIFYFS_SUCCESS != ret) {
+                ts = (struct timespec) {0};
+            }
             ret = unifyfs_invoke_get_extents_rpc(gfid, &ts);
             if (ret != UNIFYFS_SUCCESS) {
                 LOGERR("request to get extents for gfid=%d failed (ret=%d)",
@@ -894,65 +921,95 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         return EINVAL;
     }
 
-    int ret;
     int owner_rank = hash_gfid_to_server(gfid);
-    int is_owner = (owner_rank == glb_pmi_rank);
-    if (!is_owner) {
-        /* forward request to file owner */
-        p2p_request preq;
-        int rc = init_p2p_request(UNIFYFS_SERVER_RPC_EXTENTS_GET,
-                                  owner_rank, gfid, &preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            return rc;
-        }
-        assert(preq.req_state != NULL);
-        get_extents_in_t*  in  = preq.req_state->inputs;
-        get_extents_out_t* out = preq.req_state->outputs;
+    if (owner_rank == glb_pmi_rank) {
+        LOGDBG("I am owner (rank=%d) for gfid=%d", owner_rank, gfid);
+        return UNIFYFS_SUCCESS;
+    }
 
-        /* fill rpc input struct and forward request */
-        in->src_rank = (int32_t) glb_pmi_rank;
-        in->gfid     = (int32_t) gfid;
-        in->src_timestamp = *timestamp;
-        rc = forward_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            cleanup_p2p_request(&preq);
-            return rc;
+    int ret = UNIFYFS_SUCCESS;
+    p2p_request* preq = NULL;
+    int rc = add_pending_remote_request(owner_rank, gfid,
+                                        UNIFYFS_SERVER_RPC_EXTENTS_GET,
+                                        NULL, &preq);
+    if (NULL == preq) {
+        LOGERR("failed to add pending remote get_extents");
+        return UNIFYFS_FAILURE;
+    } else if (rc == UNIFYFS_PENDING) {
+        /* wait up to 5 seconds for completion of pending */
+        struct timespec timeout;
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timeout.tv_sec += 5;
+        ABT_mutex_lock(preq->pending_sync);
+        rc = ABT_cond_timedwait(preq->pending_cond, preq->pending_sync,
+                                &timeout);
+        if (ABT_ERR_COND_TIMEDOUT == rc) {
+            LOGERR("wait for pending get_extents timed-out");
+            ret = UNIFYFS_ERROR_TIMEOUT;
+        } else if (rc) {
+            LOGERR("failed to wait on condition (err=%d)", rc);
+            ret = UNIFYFS_ERROR_MARGO;
         }
+        ABT_mutex_unlock(preq->pending_sync);
+        return ret;
+    }
+        
+    assert(preq->req_state != NULL);
+    get_extents_in_t*  in  = preq->req_state->inputs;
+    get_extents_out_t* out = preq->req_state->outputs;
 
-        /* wait for request completion */
-        rc = wait_for_p2p_request(&preq);
-        if (rc != UNIFYFS_SUCCESS) {
-            cleanup_p2p_request(&preq);
-            return rc;
-        }
+    /* fill rpc input struct and forward request to owner */
+    
+    in->src_rank = (int32_t) glb_pmi_rank;
+    in->gfid     = (int32_t) gfid;
+    in->src_timestamp = *timestamp;
+    rc = forward_p2p_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        ret = rc;
+        goto clear_pending_extents_get;
+    }
 
-        /* get the result of the rpc */
-        ret = out->ret;
-        if (ret == UNIFYFS_SUCCESS) {
-            /* get number of extents */
-            unsigned int n_ext = (unsigned int) out->num_extents;
-            if (n_ext > 0) {
-                /* get bulk buffer with extent locations */
-                size_t buf_sz = (size_t)n_ext * sizeof(extent_metadata);
-                void* buf = pull_margo_bulk(preq.req_state->handle, out->extents,
-                                            buf_sz, NULL);
-                if (NULL == buf) {
-                    LOGERR("failed to pull extent metadata array");
-                    ret = UNIFYFS_ERROR_MARGO;
-                } else {
-                    /* replace local cache with received extents */
-                    extent_metadata* em_arr = (extent_metadata*) buf;
-                    struct timespec owner_stamp = (struct timespec) out->owner_timestamp;
-                    ret = unifyfs_inode_cache_extents(gfid, (int) n_ext, em_arr,
-                                                      &owner_stamp);
-                }
+    /* wait for request completion */
+    rc = wait_for_p2p_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        ret = rc;
+        goto clear_pending_extents_get;
+    }
+
+    /* get the result of the rpc */
+    ret = out->ret;
+    if (ret == UNIFYFS_SUCCESS) {
+        /* get number of extents */
+        unsigned int n_ext = (unsigned int) out->num_extents;
+        if (n_ext > 0) {
+            /* get bulk buffer with extent locations */
+            size_t buf_sz = (size_t)n_ext * sizeof(extent_metadata);
+            void* buf = pull_margo_bulk(preq->req_state->handle,
+                                        out->extents, buf_sz, NULL);
+            if (NULL == buf) {
+                LOGERR("failed to pull extent metadata array");
+                ret = UNIFYFS_ERROR_MARGO;
+            } else {
+                /* replace local cache with received extents */
+                extent_metadata* em_arr = (extent_metadata*) buf;
+                struct timespec owner_stamp = 
+                    (struct timespec) out->owner_timestamp;
+                ret = unifyfs_inode_cache_extents(gfid, (int) n_ext, em_arr,
+                                                  &owner_stamp);
             }
         }
-        cleanup_p2p_request(&preq);
-    } else {
-        ret = UNIFYFS_SUCCESS;
-        LOGDBG("I am owner (rank=%d) for gfid=%d", owner_rank, gfid);
     }
+
+    ABT_cond_broadcast(preq->pending_cond);
+    
+clear_pending_extents_get:
+    LOGDBG("clearing pending get_extents for gfid=%d", gfid);
+    rc = clear_pending_remote_request(preq);
+    if (rc != UNIFYFS_SUCCESS) {
+        LOGWARN("failed to clear pending metaget for gfid=%d", gfid);
+    }
+
+    cleanup_p2p_request(preq);
 
     return ret;
 }
@@ -973,34 +1030,52 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
     /* get input parameters */
     int sender = (int) in->src_rank;
     int gfid = (int) in->gfid;
-    
-    // MJB TODO - compare source timestamp to owner's and either
-    //            (a) bcast extents if source is zero, or
-    //            (b) return extents if source is older than owner
-    //struct timespec src_stamp = (struct timespec) in->src_timestamp;
+    struct timespec src_stamp = (struct timespec) in->src_timestamp;
 
+    int send_extents = 0;
     int owner_rank = hash_gfid_to_server(gfid);
     if (owner_rank == glb_pmi_rank) {
-        ret = unifyfs_inode_get_extents(gfid, &num_extents, &extents, &owner_stamp);
+        ret = unifyfs_inode_get_extents(gfid, &num_extents, &extents,
+                                        &owner_stamp);
         if (ret == UNIFYFS_SUCCESS) {
-            /* define a bulk handle to transfer extent_metadata array */
-            if (num_extents > 0) {
+            /* Compare source timestamp to owner's and do:
+             * (a) bcast extents if source is zero, or
+             * (b) return extents if source is older than owner
+             * (c) return just extent count and timestamp if equal */
+            int cmp = compare_timespec(&owner_stamp, &src_stamp);
+            if (1 == cmp) {
+                /* owner timestamp is newer */
+                send_extents = 1;
+                if (src_stamp.tv_sec == 0) {
+                    /* zero source timestamp, time to broadcast */
+                    ret = unifyfs_invoke_broadcast_extents_cache(gfid);
+                }
+            } else if (-1 == cmp) {
+                /* source timestamp is newer, which should not happen.
+                 * refresh source cache */
+                send_extents = 1;
+                LOGWARN("source cache timestamp is newer than owner?!?");
+            }
+            if (send_extents && (num_extents > 0)) {
+                /* define a bulk handle to transfer extent_metadata array */
                 margo_instance_id mid =
                     margo_hg_handle_get_instance(sreq->req_state->handle);
                 assert(mid != MARGO_INSTANCE_NULL);
 
                 void* buf = (void*) extents;
                 size_t buf_sz = num_extents * sizeof(extent_metadata);
+                hg_bulk_t bulk_handle = HG_BULK_NULL;
                 hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
                                                      HG_BULK_READ_ONLY,
-                                                     &bulk_resp_handle);
+                                                     &bulk_handle);
                 if (hret != HG_SUCCESS) {
                     LOGERR("margo_bulk_create() failed - %s",
                         HG_Error_to_string(hret));
                     ret = UNIFYFS_ERROR_MARGO;
                 } else {
                     /* set request output bulk for auto-free at cleanup */
-                    sreq->req_state->bulk = bulk_resp_handle;
+                    sreq->req_state->bulk = bulk_handle;
+                    bulk_resp_handle = bulk_handle;
                     LOGDBG("returning %zu extents for gfid=%d to rank=%d",
                            num_extents, gfid, sender);
                 }
@@ -1056,8 +1131,9 @@ int unifyfs_invoke_metaget_rpc(unifyfs_fops_ctx_t* ctx,
 {
     assert(NULL != attrs);
 
-    int ret = UNIFYFS_SUCCESS;
     int owner_rank = hash_gfid_to_server(gfid);
+    assert(owner_rank != glb_pmi_rank);
+
     client_rpc_req_t* creq = NULL;
     if (NULL != ctx) {
         /* have a client request that needs the response */
@@ -1078,7 +1154,8 @@ int unifyfs_invoke_metaget_rpc(unifyfs_fops_ctx_t* ctx,
     metaget_in_t*  in  = preq->req_state->inputs;
     metaget_out_t* out = preq->req_state->outputs;
 
-    /* fill rpc input struct and forward request */
+    /* fill rpc input struct and forward request to owner */
+    int ret = UNIFYFS_SUCCESS;
     in->gfid = (int32_t) gfid;
     rc = forward_p2p_request(preq);
     if (rc != UNIFYFS_SUCCESS) {

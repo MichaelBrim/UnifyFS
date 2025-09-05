@@ -71,9 +71,8 @@
     UNIFYFS_CFG(client, cwd, STRING, NULLSTRING, "current working directory", NULL) \
     UNIFYFS_CFG(client, excl_private, BOOL, on, "create node-local private files when given O_EXCL", NULL) \
     UNIFYFS_CFG(client, fsync_persist, BOOL, on, "persist written data to storage on fsync()", NULL) \
-    UNIFYFS_CFG(client, local_extents, BOOL, off, "use client-cached extents to service local reads without consulting local server", NULL) \
-    UNIFYFS_CFG(client, node_local_extents, BOOL, off, \
-        "use node-local extents to service node-local reads", NULL) \
+    UNIFYFS_CFG(client, local_extents, BOOL, off, "use client-cached extents to service client-local reads without consulting local server", NULL) \
+    UNIFYFS_CFG(client, node_local_extents, BOOL, off, "use client-cached extents to service node-local reads for laminated files", NULL) \
     UNIFYFS_CFG(client, max_files, INT, UNIFYFS_CLIENT_MAX_FILES, "client max file count", NULL) \
     UNIFYFS_CFG(client, super_magic, BOOL, on, "return UnifyFS super magic from statfs, TMPFS otherwise", NULL) \
     UNIFYFS_CFG(client, unlink_usecs, INT, 0, "number of microsecs to sleep after initiating unlink rpc", NULL) \
@@ -96,11 +95,10 @@
     UNIFYFS_CFG(margo, server_retry, INT, UNIFYFS_MARGO_SERVICE_RETRY_COUNT, "number of retries for server-server RPCs that time-out", NULL) \
     UNIFYFS_CFG(margo, server_timeout, INT, UNIFYFS_MARGO_SERVICE_TIMEOUT_MSEC, "timeout in milliseconds for server-server RPCs", NULL) \
     UNIFYFS_CFG(margo, tcp, BOOL, on, "use TCP for server-to-server margo RPCs", NULL) \
-    UNIFYFS_CFG(meta, range_size, INT, UNIFYFS_META_DEFAULT_SLICE_SZ, "metadata range size", NULL) \
     UNIFYFS_CFG_CLI(runstate, dir, STRING, RUNDIR, "runstate file directory", configurator_directory_check, 'R', "specify full path to directory to contain server-local state") \
     UNIFYFS_CFG_CLI(server, hostfile, STRING, NULLSTRING, "server hostfile name", NULL, 'H', "specify full path to server hostfile") \
     UNIFYFS_CFG_CLI(server, init_timeout, INT, UNIFYFS_DEFAULT_INIT_TIMEOUT, "timeout of waiting for server initialization", NULL, 't', "timeout in seconds to wait for servers to be ready for clients") \
-    UNIFYFS_CFG(server, local_extents, BOOL, off, "use server-cached extents to service local reads without consulting file owner", NULL) \
+    UNIFYFS_CFG(server, local_extents, BOOL, off, "use server-cached extents to service node-local reads without consulting file owner", NULL) \
     UNIFYFS_CFG(server, max_app_clients, INT, UNIFYFS_SERVER_MAX_APP_CLIENTS, "maximum number of clients per application", NULL) \
     UNIFYFS_CFG_CLI(sharedfs, dir, STRING, NULLSTRING, "shared file system directory", configurator_directory_check, 'S', "specify full path to directory to contain server shared files") \
 
