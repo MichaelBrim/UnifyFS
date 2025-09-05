@@ -39,6 +39,7 @@ struct unifyfs_inode {
     extent_metadata* extents_cache; /* cached serialized array of extents */
     size_t extents_cache_count;     /* number of entries in cached array */
     struct timespec cache_time;     /* mtime of file at last cache update */
+    struct timespec bcast_time;     /* cache_time used for last broadcast */
 
     ABT_rwlock rwlock;            /* reader-writer lock */
 };
@@ -206,11 +207,13 @@ int unifyfs_inode_cache_extents(int gfid,
  * @param gfid               the global file identifier
  *
  * @param[out] cache_time    timestamp associated with cache
+ * @param[out] bcast_time    timestamp of cache for last broadcast
  *
  * @return 0 on success, errno otherwise
  */
-int unifyfs_inode_get_cache_time(int gfid,
-                                 struct timespec* cache_time);
+int unifyfs_inode_get_cache_times(int gfid,
+                                 struct timespec* cache_time,
+                                 struct timespec* bcast_time);
 
 /**
  * @brief get the maximum file size from the local extent tree of given file

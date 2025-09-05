@@ -561,8 +561,9 @@ int unifyfs_inode_cache_extents(int gfid,
     return ret;
 }
 
-int unifyfs_inode_get_cache_time(int gfid,
-                                 struct timespec* cache_time)
+int unifyfs_inode_get_cache_times(int gfid,
+                                  struct timespec* cache_time,
+                                  struct timespec* bcast_time)
 {
     struct unifyfs_inode* ino = unifyfs_inode_lookup(gfid);
     if (NULL == ino) {
@@ -572,7 +573,10 @@ int unifyfs_inode_get_cache_time(int gfid,
     int ret = UNIFYFS_SUCCESS;
     unifyfs_inode_rdlock(ino);
     {
-        *cache_time = ino->cache_time;
+        if (NULL != cache_time)
+            *cache_time = ino->cache_time;
+        if (NULL != bcast_time)
+            *bcast_time = ino->bcast_time;
     }
     unifyfs_inode_unlock(ino);
 
@@ -623,6 +627,7 @@ int unifyfs_inode_laminate(int gfid)
 }
 
 int unifyfs_inode_get_extents(int gfid,
+                              int for_bcast,
                               size_t* n,
                               extent_metadata** extents,
                               struct timespec* timestamp)
@@ -639,7 +644,7 @@ int unifyfs_inode_get_extents(int gfid,
         extent_metadata* extarr = NULL;
         size_t n_extents = 0;
         int update_cache = 0;
-        unifyfs_inode_rdlock(ino);
+        unifyfs_inode_wrlock(ino);
         {
             if ((NULL != ino->extents_cache) &&
                 (ino->attr.mtime.tv_sec == ino->cache_time.tv_sec) &&
@@ -662,31 +667,24 @@ int unifyfs_inode_get_extents(int gfid,
 
                     *n = n_extents;
                     *extents = extarr;
-                    update_cache = 1;
+
+                    if (NULL != ino->extents_cache) {
+                        ino->extents_cache_count = 0;
+                        free(ino->extents_cache);
+                    }
+                    ino->extents_cache = extarr;
+                    ino->extents_cache_count = n_extents;
+                    ino->cache_time = ino->attr.mtime;
                 }
+            }
+            if (for_bcast) {
+                ino->bcast_time = ino->cache_time;
             }
             if (NULL != timestamp) {
                 *timestamp = ino->cache_time;
             }
         }
         unifyfs_inode_unlock(ino);
-
-        if (update_cache) {
-            unifyfs_inode_wrlock(ino);
-            {
-                if (NULL != ino->extents_cache) {
-                    ino->extents_cache_count = 0;
-                    free(ino->extents_cache);
-                }
-                ino->extents_cache = extarr;
-                ino->extents_cache_count = n_extents;
-                ino->cache_time = ino->attr.mtime;
-                if (NULL != timestamp) {
-                    *timestamp = ino->cache_time;
-                }
-            }
-            unifyfs_inode_unlock(ino);
-        }
     }
     return ret;
 }

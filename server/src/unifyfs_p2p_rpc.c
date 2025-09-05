@@ -880,12 +880,12 @@ int unifyfs_find_extent_chunks(unifyfs_fops_ctx_t* ctx,
         int file_laminated = (attrs.is_shared && attrs.is_laminated);
         if (!(is_owner || use_server_local_extents || file_laminated)) {
             /* send request for updated extents to owner */
-            struct timespec ts;
-            ret = unifyfs_inode_get_cache_time(gfid, &ts);
+            struct timespec cache_ts;
+            ret = unifyfs_inode_get_cache_times(gfid, &cache_ts, NULL);
             if (UNIFYFS_SUCCESS != ret) {
-                ts = (struct timespec) {0};
+                cache_ts = (struct timespec) {0};
             }
-            ret = unifyfs_invoke_get_extents_rpc(gfid, &ts);
+            ret = unifyfs_invoke_get_extents_rpc(gfid, &cache_ts);
             if (ret != UNIFYFS_SUCCESS) {
                 LOGERR("request to get extents for gfid=%d failed (ret=%d)",
                        gfid, ret);
@@ -1045,9 +1045,11 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
             int cmp = compare_timespec(&owner_stamp, &src_stamp);
             if (1 == cmp) {
                 /* owner timestamp is newer */
+                LOGDBG("owner has newer extents metadata");
                 send_extents = 1;
                 if (src_stamp.tv_sec == 0) {
                     /* zero source timestamp, time to broadcast */
+                    LOGDBG("broadcasting extents metadata to cache");
                     ret = unifyfs_invoke_broadcast_extents_cache(gfid);
                 }
             } else if (-1 == cmp) {
