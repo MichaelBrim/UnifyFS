@@ -902,20 +902,32 @@ static int process_extents_bcast_rpc(server_rpc_req_t* req)
 static int process_extents_cache_bcast_rpc(server_rpc_req_t* req)
 {
     /* get target file and extents */
+    int ret;
     coll_request* coll = (coll_request*) req->coll;
     extent_cache_bcast_in_t* in = coll->input;
     int gfid = (int) in->gfid;
     size_t num_extents = (size_t) in->num_extents;
-    extent_metadata* extents = coll->bulk_buf;
 
     LOGDBG("gfid=%d num_extents=%zu", gfid, num_extents);
 
-    /* add extents */
-    struct timespec ts = in->timestamp;
-    int ret = sm_cache_extents(gfid, num_extents, extents, &ts);
-    if (ret != UNIFYFS_SUCCESS) {
-        LOGERR("cache_extents(gfid=%d) failed - rc=%d", gfid, ret);
+    /* extents array is bulk transfer buffer owned by collective that will be
+     * freed, so make a copy that can be cached */
+    size_t total_sz = num_extents * sizeof(extent_metadata);
+    extent_metadata* extents = malloc(total_sz);
+    if (NULL != extents) {
+        memcpy(extents, coll->bulk_buf, total_sz);
+        
+        /* cache extents */
+        struct timespec ts = in->timestamp;
+        ret = sm_cache_extents(gfid, num_extents, extents, &ts);
+        if (ret != UNIFYFS_SUCCESS) {
+            LOGERR("cache_extents(gfid=%d) failed - rc=%d", gfid, ret);
+        }
+    } else {
+        LOGERR("failed to allocate extents array");
+        ret = ENOMEM;
     }
+    
     collective_set_local_retval(req->coll, ret);
 
     /* create a ULT to finish broadcast operation */
