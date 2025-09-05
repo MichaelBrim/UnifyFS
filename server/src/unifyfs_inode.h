@@ -125,13 +125,15 @@ int unifyfs_inode_truncate(int gfid, unsigned long size);
  * @brief get the local extent array from the target inode
  *
  * @param gfid       the global file identifier
+ * @param for_bcast  if non-zero, set the bcast_time on the inode
  * @param n          pointer to size of the extents array
- * @param extents    pointer to extents array (caller should free)
+ * @param extents    pointer to extents array (caller should NOT free)
  * @param timestamp  pointer to struct timespec to fill with mtime
  *
  * @return 0 on success, errno otherwise
  */
 int unifyfs_inode_get_extents(int gfid,
+                              int for_bcast,
                               size_t* n,
                               extent_metadata** extents,
                               struct timespec* timestamp);
