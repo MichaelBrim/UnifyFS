@@ -147,12 +147,6 @@ int wait_for_p2p_request(p2p_request* preq)
 
 void cleanup_p2p_request(p2p_request* preq)
 {
-    /* cleanup p2p rpc state */
-    int rc = cleanup_rpc_state(preq->req_state);
-    if (rc != UNIFYFS_SUCCESS) {
-        LOGERR("failed to cleanup rpc state for p2p request(%p)", preq);
-    }
-
     /* cleanup pending client reqs */
     if (NULL != preq->pending_client_reqs) {
         /* NOTE: normally, the pending client list should 
@@ -173,11 +167,27 @@ void cleanup_p2p_request(p2p_request* preq)
         preq->pending_client_reqs = NULL;
     }
 
-    if (ABT_COND_NULL != preq->pending_cond) {
-        ABT_cond_free(&(preq->pending_cond));
-    }
+    /* release other pending state */
     if (ABT_MUTEX_NULL != preq->pending_sync) {
+        if (ABT_COND_NULL != preq->pending_cond) {
+            do {
+                int waiters = 0;
+                ABT_mutex_lock(preq->pending_sync);
+                waiters = preq->pending_waiters;
+                ABT_mutex_unlock(preq->pending_sync);
+                if (waiters) {
+                    ABT_cond_broadcast(preq->pending_cond);
+                }
+            while (waiters > 0);
+            ABT_cond_free(&(preq->pending_cond));
+        }
         ABT_mutex_free(&(preq->pending_sync));
+    }
+
+    /* cleanup p2p rpc state */
+    int rc = cleanup_rpc_state(preq->req_state);
+    if (rc != UNIFYFS_SUCCESS) {
+        LOGERR("failed to cleanup rpc state for p2p request(%p)", preq);
     }
 }
 
@@ -941,6 +951,7 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         clock_gettime(CLOCK_REALTIME, &timeout);
         timeout.tv_sec += 5;
         ABT_mutex_lock(preq->pending_sync);
+        preq->pending_waiters++;
         LOGDBG("waiting on pending get_extents condition for preq(%p)", preq);
         rc = ABT_cond_timedwait(preq->pending_cond, preq->pending_sync,
                                 &timeout);
@@ -951,11 +962,14 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
             LOGERR("failed to wait on condition (err=%d)", rc);
             ret = UNIFYFS_ERROR_MARGO;
         } else {
-            LOGDBG("pending get_extents condition  for preq(%p) was signaled",
+            LOGDBG("pending get_extents condition for preq(%p) was signaled",
                    preq);
         }
+        preq->pending_waiters--;
         ABT_mutex_unlock(preq->pending_sync);
         return ret;
+    } else {
+        LOGDBG("added pending get_extents for gfid=%d - preq(%p)", gfid, preq);
     }
         
     assert(preq->req_state != NULL);
@@ -1004,13 +1018,21 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         }
     }
 
-    ABT_cond_broadcast(preq->pending_cond);
-    
 clear_pending_extents_get:
-    LOGDBG("clearing pending get_extents for gfid=%d", gfid);
+    LOGDBG("clearing pending get_extents for preq(%p) gfid=%d", preq, gfid);
     rc = clear_pending_remote_request(preq);
     if (rc != UNIFYFS_SUCCESS) {
         LOGWARN("failed to clear pending metaget for gfid=%d", gfid);
+    }
+
+    int waiters = 0;
+    ABT_mutex_lock(preq->pending_sync);
+    waiters = preq->pending_waiters;
+    ABT_mutex_unlock(preq->pending_sync);
+    if (waiters > 1) {
+        ABT_cond_broadcast(preq->pending_cond);
+    } else if (waiters == 1) {
+        ABT_cond_signal(preq->pending_cond);
     }
 
     cleanup_p2p_request(preq);

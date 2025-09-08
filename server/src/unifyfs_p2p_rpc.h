@@ -38,8 +38,9 @@ typedef struct {
     client_rpc_req_t* client_req;     // for only one
     arraylist_t* pending_client_reqs; // for more than one
 
-    ABT_cond pending_cond; /* condition to signal upon pending completion */
+    ABT_cond pending_cond;  /* condition to signal upon pending completion */
     ABT_mutex pending_sync; /* mutex for above condition variable */
+    int pending_waiters;    /* track number of pending waiters */
 } p2p_request;
 
 /* helper method to initialize peer rpc request */
