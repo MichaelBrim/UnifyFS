@@ -178,7 +178,7 @@ void cleanup_p2p_request(p2p_request* preq)
                 if (waiters) {
                     ABT_cond_broadcast(preq->pending_cond);
                 }
-            while (waiters > 0);
+            } while (waiters > 0);
             ABT_cond_free(&(preq->pending_cond));
         }
         ABT_mutex_free(&(preq->pending_sync));
