@@ -546,8 +546,11 @@ int unifyfs_inode_cache_extents(int gfid,
                 ino->extents_cache = extents;
                 ino->extents_cache_count = num_extents;
                 ino->cache_time = *cache_time;
-                LOGINFO("cached %d extents to inode (gfid=%d)",
-                        num_extents, gfid);
+                LOGINFO("caching %d extents to inode (gfid=%d) "
+                        "using timestamp=%lu.%09lu",
+                        num_extents, gfid, 
+                        cache_time->tv_sec,
+                        cache_time->tv_nsec);
             }
         } else {
             LOGDBG("local cache time for gfid=%d already matches", gfid);
@@ -783,6 +786,8 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                 cache_expire.tv_sec += UNIFYFS_METADATA_CACHE_SECONDS;
                 clock_gettime(CLOCK_REALTIME, &now);
                 if (compare_timespec(&now, &cache_expire) <= 0) {
+                    LOGDBG("using cached extent metadata - stamp=(%lu.%09lu)",
+                           ino->cache_time.tv_sec, ino->cache_time.tv_nsec);
                     ret = get_extent_cache_chunks(extent,
                                                   ino->extents_cache,
                                                   ino->extents_cache_count,
@@ -791,6 +796,9 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                     if (UNIFYFS_SUCCESS == ret) {
                         done = 1;
                     }
+                } else {
+                    LOGDBG("NOT using cached extent metadata - stamp=(%lu.%09lu)",
+                           ino->cache_time.tv_sec, ino->cache_time.tv_nsec);
                 }
             }
 

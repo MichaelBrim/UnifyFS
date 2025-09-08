@@ -206,6 +206,8 @@ int add_pending_remote_request(int peer_rank,
     bool have_pending = check_pending_remote_request(peer_rank, gfid,
                                                      op, &preq);
     if (have_pending) {
+        LOGDBG("found pending (op=%d) to rank[%d] for gfid=%d - preq(%p)",
+               op, peer_rank, gfid, preq);
         ret = UNIFYFS_PENDING;
     } else {
         preq = (p2p_request*) calloc(1, sizeof(p2p_request));
@@ -221,6 +223,8 @@ int add_pending_remote_request(int peer_rank,
             return rc;
         }
         preq->client_req = client_req;
+        LOGDBG("allocated pending (op=%d) to rank[%d] for gfid=%d - preq(%p)",
+               op, peer_rank, gfid, preq);
         ret = UNIFYFS_SUCCESS;
     }
 
@@ -273,6 +277,8 @@ int add_pending_remote_request(int peer_rank,
     if ((ret == UNIFYFS_SUCCESS) || (ret == UNIFYFS_PENDING)) {
         *preqp = preq;
     } else if (allocated) {
+        LOGDBG("an error occurred (ret=%d) - cleaning preq(%p)", ret, preq);
+        clear_pending_remote_request(preq);
         cleanup_p2p_request(preq);
         free(preq);
     }
