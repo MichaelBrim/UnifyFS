@@ -170,8 +170,8 @@ void cleanup_p2p_request(p2p_request* preq)
     /* release other pending state */
     if (ABT_MUTEX_NULL != preq->pending_sync) {
         if (ABT_COND_NULL != preq->pending_cond) {
+            int waiters = 0;
             do {
-                int waiters = 0;
                 ABT_mutex_lock(preq->pending_sync);
                 waiters = preq->pending_waiters;
                 ABT_mutex_unlock(preq->pending_sync);
