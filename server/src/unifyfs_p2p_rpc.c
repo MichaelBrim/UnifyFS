@@ -203,6 +203,8 @@ int add_pending_remote_request(int peer_rank,
 
     *preqp = NULL;
 
+    ABT_mutex_lock(pending_remote_requests_abt_sync);
+
     bool have_pending = check_pending_remote_request(peer_rank, gfid,
                                                      op, &preq);
     if (have_pending) {
@@ -227,8 +229,6 @@ int add_pending_remote_request(int peer_rank,
                op, peer_rank, gfid, preq);
         ret = UNIFYFS_SUCCESS;
     }
-
-    ABT_mutex_lock(pending_remote_requests_abt_sync);
 
     if ((NULL != client_req) && have_pending) {
         /* add client request to pending remote */
@@ -290,10 +290,11 @@ bool check_pending_remote_request(int peer_rank,
                                   server_rpc_e op,
                                   p2p_request** preqp)
 {
+    // NOTE: this method assumes caller has locked sync mutex
+
     bool is_pending = false;
     p2p_request* pending;
 
-    ABT_mutex_lock(pending_remote_requests_abt_sync);
     if (NULL != pending_remote_requests) {
         int num_pending = arraylist_size(pending_remote_requests);
         for (int i = 0; i < num_pending; i++) {
@@ -311,7 +312,6 @@ bool check_pending_remote_request(int peer_rank,
     } else {
         LOGERR("pending_remote_requests is NULL!");
     }
-    ABT_mutex_unlock(pending_remote_requests_abt_sync);
 
     return is_pending;
 }
