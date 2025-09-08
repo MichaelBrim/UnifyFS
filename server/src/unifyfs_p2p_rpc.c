@@ -895,16 +895,28 @@ int unifyfs_find_extent_chunks(unifyfs_fops_ctx_t* ctx,
     if (ret == UNIFYFS_SUCCESS) {
         int file_laminated = (attrs.is_shared && attrs.is_laminated);
         if (!(is_owner || use_server_local_extents || file_laminated)) {
-            /* send request for updated extents to owner */
-            struct timespec cache_ts;
-            ret = unifyfs_inode_get_cache_times(gfid, &cache_ts, NULL);
-            if (UNIFYFS_SUCCESS != ret) {
+            int send_request = 1;
+            struct timespec cache_ts, valid_ts;
+            ret = unifyfs_inode_get_cache_times(gfid, &cache_ts, &valid_ts);
+            if (UNIFYFS_SUCCESS == ret) {
+                struct timespec now;
+                struct timespec cache_expire = valid_ts;
+                cache_expire.tv_sec += UNIFYFS_METADATA_CACHE_SECONDS;
+                clock_gettime(CLOCK_REALTIME, &now);
+                if (compare_timespec(&now, &cache_expire) <= 0) {
+                    /* cached extent metadata is still valid */
+                    send_request = 0;
+                }
+            } else {
                 cache_ts = (struct timespec) {0};
             }
-            ret = unifyfs_invoke_get_extents_rpc(gfid, &cache_ts);
-            if (ret != UNIFYFS_SUCCESS) {
-                LOGERR("request to get extents for gfid=%d failed (ret=%d)",
-                       gfid, ret);
+            if (send_request) {
+                /* send request for updated extents to owner */
+                ret = unifyfs_invoke_get_extents_rpc(gfid, &cache_ts);
+                if (ret != UNIFYFS_SUCCESS) {
+                    LOGERR("request to get extents for gfid=%d failed (ret=%d)",
+                        gfid, ret);
+                }
             }
         }
     }
@@ -952,15 +964,15 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
         LOGERR("failed to add pending remote get_extents");
         return UNIFYFS_FAILURE;
     } else if (rc == UNIFYFS_PENDING) {
-        /* wait up to 5 seconds for completion of pending */
-        struct timespec timeout;
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timeout.tv_sec += 5;
+        /* wait for completion of pending get_extents request */
+        struct timespec pendwait;
+        clock_gettime(CLOCK_REALTIME, &pendwait);
+        pendwait.tv_sec += UNIFYFS_METADATA_CACHE_SECONDS;
         ABT_mutex_lock(preq->pending_sync);
         preq->pending_waiters++;
         LOGDBG("waiting on pending get_extents condition for preq(%p)", preq);
         rc = ABT_cond_timedwait(preq->pending_cond, preq->pending_sync,
-                                &timeout);
+                                &pendwait);
         if (ABT_ERR_COND_TIMEDOUT == rc) {
             LOGERR("wait for pending get_extents timed-out");
             ret = UNIFYFS_ERROR_TIMEOUT;
@@ -983,7 +995,6 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
     get_extents_out_t* out = preq->req_state->outputs;
 
     /* fill rpc input struct and forward request to owner */
-    
     in->src_rank = (int32_t) glb_pmi_rank;
     in->gfid     = (int32_t) gfid;
     in->src_timestamp = *timestamp;
@@ -1004,10 +1015,12 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
     ret = out->ret;
     if (ret == UNIFYFS_SUCCESS) {
         /* get number of extents */
-        unsigned int n_ext = (unsigned int) out->num_extents;
+        extent_metadata* em_arr = NULL;
+        size_t n_ext = (size_t) out->num_extents;
+        struct timespec owner_stamp = (struct timespec) out->owner_timestamp;
         if ((n_ext > 0) && (out->extents != HG_BULK_NULL)) {
             /* get bulk buffer with extent locations */
-            size_t buf_sz = (size_t)n_ext * sizeof(extent_metadata);
+            size_t buf_sz = n_ext * sizeof(extent_metadata);
             void* buf = pull_margo_bulk(preq->req_state->handle,
                                         out->extents, buf_sz, NULL);
             if (NULL == buf) {
@@ -1015,13 +1028,10 @@ int unifyfs_invoke_get_extents_rpc(int gfid,
                 ret = UNIFYFS_ERROR_MARGO;
             } else {
                 /* replace local cache with received extents */
-                extent_metadata* em_arr = (extent_metadata*) buf;
-                struct timespec owner_stamp = 
-                    (struct timespec) out->owner_timestamp;
-                ret = unifyfs_inode_cache_extents(gfid, (int) n_ext, em_arr,
-                                                  &owner_stamp);
+                em_arr = (extent_metadata*) buf;
             }
         }
+        ret = sm_cache_extents(gfid, n_ext, em_arr, &owner_stamp);
     }
 
 clear_pending_extents_get:
@@ -1067,7 +1077,7 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
     int send_extents = 0;
     int owner_rank = hash_gfid_to_server(gfid);
     if (owner_rank == glb_pmi_rank) {
-        ret = unifyfs_inode_get_extents(gfid, 0, &num_extents, &extents,
+        ret = unifyfs_inode_get_extents(gfid, &num_extents, &extents,
                                         &owner_stamp);
         if (ret == UNIFYFS_SUCCESS) {
             /* Compare source timestamp to owner's and do:
@@ -1080,7 +1090,7 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                 LOGDBG("owner has newer extents metadata");
                 send_extents = 1;
                 if (src_stamp.tv_sec == 0) {
-                    /* zero source timestamp, time to broadcast */
+                    /* source timestamp is zero, time to broadcast */
                     LOGDBG("broadcasting extents metadata to cache");
                     ret = unifyfs_invoke_broadcast_extents_cache(gfid);
                 }
@@ -1090,6 +1100,8 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                 send_extents = 1;
                 LOGWARN("source cache timestamp is newer than owner?!?");
             }
+            // else, the timestamps are the same, so don't send
+
             if (send_extents && (num_extents > 0)) {
                 /* define a bulk handle to transfer extent_metadata array */
                 margo_instance_id mid =

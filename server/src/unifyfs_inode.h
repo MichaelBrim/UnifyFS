@@ -39,7 +39,7 @@ struct unifyfs_inode {
     extent_metadata* extents_cache; /* cached serialized array of extents */
     size_t extents_cache_count;     /* number of entries in cached array */
     struct timespec cache_time;     /* mtime of file at last cache update */
-    struct timespec bcast_time;     /* cache_time used for last broadcast */
+    struct timespec valid_time;     /* cache_time used for last broadcast */
 
     ABT_rwlock rwlock;            /* reader-writer lock */
 };
@@ -124,17 +124,15 @@ int unifyfs_inode_truncate(int gfid, unsigned long size);
 /**
  * @brief get the local extent array from the target inode
  *
- * @param gfid       the global file identifier
- * @param for_bcast  if non-zero, set the bcast_time on the inode
- * @param n          pointer to size of the extents array
- * @param extents    pointer to extents array (caller should NOT free)
- * @param timestamp  pointer to struct timespec to fill with mtime
+ * @param gfid         the global file identifier
+ * @param num_extents  pointer to size of the extents array
+ * @param extents      pointer to extents array (caller should NOT free)
+ * @param timestamp    pointer to struct timespec to fill with mtime
  *
  * @return 0 on success, errno otherwise
  */
 int unifyfs_inode_get_extents(int gfid,
-                              int for_bcast,
-                              size_t* n,
+                              size_t* num_extents,
                               extent_metadata** extents,
                               struct timespec* timestamp);
 
@@ -208,14 +206,14 @@ int unifyfs_inode_cache_extents(int gfid,
  *
  * @param gfid               the global file identifier
  *
- * @param[out] cache_time    timestamp associated with cache
- * @param[out] bcast_time    timestamp of cache for last broadcast
+ * @param[out] cache_time    timestamp associated with cache contents
+ * @param[out] valid_time    timestamp when cache was last validated
  *
  * @return 0 on success, errno otherwise
  */
 int unifyfs_inode_get_cache_times(int gfid,
                                  struct timespec* cache_time,
-                                 struct timespec* bcast_time);
+                                 struct timespec* valid_time);
 
 /**
  * @brief get the maximum file size from the local extent tree of given file

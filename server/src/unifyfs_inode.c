@@ -540,6 +540,7 @@ int unifyfs_inode_cache_extents(int gfid,
     int ret = UNIFYFS_SUCCESS;
     unifyfs_inode_wrlock(ino);
     {
+        /* update cache if inode and parameter timestamps differ */
         if (0 != compare_timespec(cache_time, &(ino->cache_time))) {
             invalidate_extents_cache(ino);
             if (num_extents > 0) {
@@ -553,10 +554,18 @@ int unifyfs_inode_cache_extents(int gfid,
                         cache_time->tv_nsec);
             }
         } else {
-            LOGDBG("local cache time for gfid=%d already matches", gfid);
+            LOGDBG("inode cache time matches for gfid=%d", gfid);
             if (NULL != extents) {
                 free(extents);
             }
+        }
+
+        /* set cache valid time */
+        int owner_rank = hash_gfid_to_server(gfid);
+        if (owner_rank != glb_pmi_rank) {
+            struct timespec now;
+            clock_gettime(CLOCK_REALTIME, &now);
+            ino->valid_time = now;
         }
     }
     unifyfs_inode_unlock(ino);
@@ -566,7 +575,7 @@ int unifyfs_inode_cache_extents(int gfid,
 
 int unifyfs_inode_get_cache_times(int gfid,
                                   struct timespec* cache_time,
-                                  struct timespec* bcast_time)
+                                  struct timespec* valid_time)
 {
     struct unifyfs_inode* ino = unifyfs_inode_lookup(gfid);
     if (NULL == ino) {
@@ -578,8 +587,8 @@ int unifyfs_inode_get_cache_times(int gfid,
     {
         if (NULL != cache_time)
             *cache_time = ino->cache_time;
-        if (NULL != bcast_time)
-            *bcast_time = ino->bcast_time;
+        if (NULL != valid_time)
+            *valid_time = ino->valid_time;
     }
     unifyfs_inode_unlock(ino);
 
@@ -630,12 +639,11 @@ int unifyfs_inode_laminate(int gfid)
 }
 
 int unifyfs_inode_get_extents(int gfid,
-                              int for_bcast,
-                              size_t* n,
+                              size_t* num_extents,
                               extent_metadata** extents,
                               struct timespec* timestamp)
 {
-    if ((NULL == n) || (NULL == extents)) {
+    if ((NULL == num_extents) || (NULL == extents)) {
         return EINVAL;
     }
 
@@ -651,8 +659,11 @@ int unifyfs_inode_get_extents(int gfid,
             if ((NULL != ino->extents_cache) &&
                 (ino->attr.mtime.tv_sec == ino->cache_time.tv_sec) &&
                 (ino->attr.mtime.tv_nsec == ino->cache_time.tv_nsec)) {
+                struct timespec now;
+                clock_gettime(CLOCK_REALTIME, &now);
+                ino->valid_time = now;
                 *extents = ino->extents_cache;
-                *n = ino->extents_cache_count;
+                *num_extents = ino->extents_cache_count;
             } else {
                 struct extent_tree* tree = ino->extents;
                 n_extents = tree->count;
@@ -667,7 +678,7 @@ int unifyfs_inode_get_extents(int gfid,
                         i++;
                     }
 
-                    *n = n_extents;
+                    *num_extents = n_extents;
                     *extents = extarr;
 
                     if (NULL != ino->extents_cache) {
@@ -677,11 +688,10 @@ int unifyfs_inode_get_extents(int gfid,
                     ino->extents_cache = extarr;
                     ino->extents_cache_count = n_extents;
                     ino->cache_time = ino->attr.mtime;
+                    ino->valid_time = ino->cache_time;
                 }
             }
-            if (for_bcast) {
-                ino->bcast_time = ino->cache_time;
-            }
+
             if (NULL != timestamp) {
                 *timestamp = ino->cache_time;
             }
@@ -786,7 +796,7 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                 cache_expire.tv_sec += UNIFYFS_METADATA_CACHE_SECONDS;
                 clock_gettime(CLOCK_REALTIME, &now);
                 if (compare_timespec(&now, &cache_expire) <= 0) {
-                    LOGDBG("using cached extent metadata - stamp=(%lu.%09lu)",
+                    LOGDBG("using cached extents - timestamp=%lu.%09lu",
                            ino->cache_time.tv_sec, ino->cache_time.tv_nsec);
                     ret = get_extent_cache_chunks(extent,
                                                   ino->extents_cache,
@@ -797,7 +807,7 @@ int unifyfs_inode_get_extent_chunks(unifyfs_extent_t* extent,
                         done = 1;
                     }
                 } else {
-                    LOGDBG("NOT using cached extent metadata - stamp=(%lu.%09lu)",
+                    LOGDBG("NOT using cached extents - timestamp=%lu.%09lu",
                            ino->cache_time.tv_sec, ino->cache_time.tv_nsec);
                 }
             }
@@ -850,7 +860,6 @@ int compare_data_chunks(const void* _c1, const void* _c2)
         return 0;
     }
 }
-
 
 int unifyfs_inode_resolve_extent_chunks(unsigned int n_extents,
                                         unifyfs_extent_t* extents,

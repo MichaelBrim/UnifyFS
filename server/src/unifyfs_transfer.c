@@ -122,7 +122,7 @@ int create_local_transfers(int gfid,
 
     size_t n_extents = 0;
     extent_metadata* extents = NULL;
-    int rc = unifyfs_inode_get_extents(gfid, 0, &n_extents, &extents, NULL);
+    int rc = unifyfs_inode_get_extents(gfid, &n_extents, &extents, NULL);
     if (rc != UNIFYFS_SUCCESS) {
         if (rc != ENOENT) {
             LOGERR("failed to get extents from inode for gfid=%d", gfid);

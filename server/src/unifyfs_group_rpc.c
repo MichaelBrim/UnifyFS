@@ -1113,7 +1113,7 @@ int unifyfs_invoke_broadcast_extents(int gfid)
 
     size_t n_extents = 0;
     struct extent_metadata* extents = NULL;
-    ret = unifyfs_inode_get_extents(gfid, 1, &n_extents, &extents, NULL);
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, NULL);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("failed to get extents for gfid=%d", gfid);
         return ret;
@@ -1249,21 +1249,12 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
     /* assuming success */
     int ret = UNIFYFS_SUCCESS;
 
-    struct timespec cache_ts, bcast_ts;
-    ret = unifyfs_inode_get_cache_times(gfid, &cache_ts, &bcast_ts);
-    if (UNIFYFS_SUCCESS == ret) {
-        if (0 == compare_timespec(&cache_ts, &bcast_ts)) {
-            /* last cache was broadcast already */
-            return UNIFYFS_SUCCESS;
-        }
-    }
-
     LOGDBG("BCAST_RPC: starting cache extents for gfid=%d", gfid);
 
     size_t n_extents = 0;
     struct extent_metadata* extents = NULL;
     struct timespec ts;
-    ret = unifyfs_inode_get_extents(gfid, 1, &n_extents, &extents, &ts);
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, &ts);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("failed to get extents for gfid=%d", gfid);
         return ret;
@@ -1520,7 +1511,7 @@ int unifyfs_invoke_broadcast_laminate(int gfid)
 
     size_t n_extents = 0;
     struct extent_metadata* extents = NULL;
-    ret = unifyfs_inode_get_extents(gfid, 1, &n_extents, &extents, NULL);
+    ret = unifyfs_inode_get_extents(gfid, &n_extents, &extents, NULL);
     if (ret != UNIFYFS_SUCCESS) {
         LOGERR("failed to get extents for gfid=%d", gfid);
         return ret;
