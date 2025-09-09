@@ -1127,6 +1127,7 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                     } else {
                         /* set request output bulk for auto-free at cleanup */
                         sreq->req_state->bulk = bulk_handle;
+                        sreq->req_state->bulk_buf = buf;
                         bulk_resp_handle = bulk_handle;
                         LOGDBG("returning %zu extents for gfid=%d to rank=%d",
                             num_extents, gfid, sender);

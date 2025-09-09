@@ -34,7 +34,7 @@ typedef struct rpc_state {
     size_t inputs_sz;  // if non-zero, we are allocating space for input_args
     size_t outputs_sz; // if non-zero, we are allocating space for output_args
     
-    void* bulk_buf;
+    void* bulk_buf;    // set this to free buf on cleanup
     size_t bulk_sz;
     hg_bulk_t bulk;    // set this to free bulk on cleanup
     

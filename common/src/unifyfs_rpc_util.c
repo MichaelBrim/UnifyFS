@@ -203,7 +203,7 @@ create_rpc_response(hg_handle_t handle,
     if (NULL != new_rpc) {
         LOGDBG("created state for response rpc(%p) with handle(%p)",
                new_rpc, handle);
-        
+
         new_rpc->initiator = 0;
         new_rpc->handle = handle;
 
@@ -216,11 +216,11 @@ create_rpc_response(hg_handle_t handle,
             assert(hgi);
             new_rpc->rpc_id = hgi->id;
         }
-        
+
         if (NULL != input) {
             new_rpc->inputs = input;
             new_rpc->have_input = 1;
-        } 
+        }
 
         if (NULL != output) {
             new_rpc->outputs = output;
@@ -268,7 +268,12 @@ int cleanup_rpc_state(rpc_state* rpc)
     if (HG_BULK_NULL != rpc->bulk) {
         LOGDBG("calling margo_bulk_free(%p) for rpc(%p)", rpc->bulk, rpc);
         margo_bulk_free(rpc->bulk);
-    }    
+    }
+
+    if (NULL != rpc->bulk_buf) {
+        LOGDBG("freeing bulk buffer(%p) for rpc(%p)", rpc->bulk_buf, rpc);
+        free(rpc->bulk_buf);
+    }
 
     if ((NULL != rpc->inputs) && (0 != rpc->inputs_sz)) {
         /* free since we allocated it */
@@ -387,7 +392,7 @@ int async_rpc_request_finish(rpc_state* rpc)
         return EINVAL;
 
     int ret = UNIFYFS_SUCCESS;
-    
+
     hg_return_t hret = margo_wait(rpc->mreq);
     if (hret == HG_SUCCESS) {
         if (NULL != rpc->outputs) {
@@ -408,7 +413,7 @@ int async_rpc_request_finish(rpc_state* rpc)
         LOGERR("margo_wait(%p) failed - %s",
                rpc->mreq, HG_Error_to_string(hret));
         ret = UNIFYFS_ERROR_MARGO;
-    } 
+    }
     return ret;
 }
 
@@ -563,7 +568,7 @@ int push_margo_bulk(hg_handle_t rpc_hdl,
                HG_Error_to_string(hret));
         return UNIFYFS_ERROR_MARGO;
     }
-    
+
     /* execute the transfer to push data from local buffer
      * into remote buffer.
      *
@@ -590,7 +595,7 @@ int push_margo_bulk(hg_handle_t rpc_hdl,
 
     if (hret == HG_SUCCESS) {
         LOGDBG("successful bulk push (%zu bytes)", buf_sz);
-        
+
         /* deregister our bulk transfer buffer */
         margo_bulk_free(bulk_local);
     } else {
