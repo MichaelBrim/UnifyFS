@@ -517,7 +517,7 @@ void* pull_margo_bulk(hg_handle_t rpc_hdl,
     } while (remain > 0);
 
     if (hret == HG_SUCCESS) {
-        LOGDBG("successful bulk transfer (%zu bytes)", bulk_sz);
+        LOGDBG("successful bulk pull (%zu bytes)", bulk_sz);
         if (local_bulk != NULL) {
             *local_bulk = bulk_local;
         } else {
@@ -526,7 +526,7 @@ void* pull_margo_bulk(hg_handle_t rpc_hdl,
         }
         return buffer;
     } else {
-        LOGERR("failed bulk transfer (transferred %zu of %zu bytes) - %s",
+        LOGERR("failed bulk pull (transferred %zu of %zu bytes) - %s",
                (bulk_sz - remain), bulk_sz, HG_Error_to_string(hret));
         free(buffer);
         return NULL;
@@ -589,12 +589,12 @@ int push_margo_bulk(hg_handle_t rpc_hdl,
     } while (remain > 0);
 
     if (hret == HG_SUCCESS) {
-        LOGDBG("successful bulk transfer (%zu bytes)", buf_sz);
+        LOGDBG("successful bulk push (%zu bytes)", buf_sz);
         
         /* deregister our bulk transfer buffer */
         margo_bulk_free(bulk_local);
     } else {
-        LOGERR("failed bulk transfer (transferred %zu of %zu bytes) - %s",
+        LOGERR("failed bulk push (transferred %zu of %zu bytes) - %s",
                (buf_sz - remain), buf_sz, HG_Error_to_string(hret));
         return UNIFYFS_ERROR_MARGO;
     }
