@@ -418,32 +418,6 @@ int margo_server_rpc_init(void)
         }
     }
 
-#if defined(HG_VERSION_MAJOR) && (HG_VERSION_MAJOR > 1)
-    /* redirect mercury log to ours, using current log level */
-    const char* mercury_log_level = NULL;
-    switch (unifyfs_log_level) {
-    case LOG_DBG:
-        mercury_log_level = "debug";
-        break;
-    case LOG_ERR:
-        mercury_log_level = "error";
-        break;
-    case LOG_WARN:
-        mercury_log_level = "warning";
-        break;
-    default:
-        break;
-    }
-    if (NULL != mercury_log_level) {
-        HG_Set_log_level(mercury_log_level);
-    }
-    if (NULL != unifyfs_log_stream) {
-        hg_log_set_stream_debug(unifyfs_log_stream);
-        hg_log_set_stream_error(unifyfs_log_stream);
-        hg_log_set_stream_warning(unifyfs_log_stream);
-    }
-#endif
-
     margo_instance_id mid;
     mid = setup_local_target();
     if (mid == MARGO_INSTANCE_NULL) {
@@ -484,6 +458,41 @@ int margo_server_rpc_init(void)
             register_server_server_rpcs(unifyfsd_rpc_context->svr_mid);
         }
     }
+
+#if defined(HG_VERSION_MAJOR) && (HG_VERSION_MAJOR > 1)
+    /* redirect mercury logging to ours */
+    if (NULL != unifyfs_log_stream) {
+        hg_log_set_stream_debug(unifyfs_log_stream);
+        hg_log_set_stream_error(unifyfs_log_stream);
+        hg_log_set_stream_warning(unifyfs_log_stream);
+    }
+
+    /* set mercury log output using current log level */
+    const char* mercury_log_level = NULL;
+    const char* mercury_log_subsys = NULL;
+    switch (unifyfs_log_level) {
+    case LOG_DBG:
+        mercury_log_level = "debug";
+        mercury_log_subsys = "hg,addr,bulk,na,proc,rpc"; // kitchen sink
+        break;
+    case LOG_ERR:
+        mercury_log_level = "error";
+        mercury_log_subsys = "hg,rpc";
+        break;
+    case LOG_WARN:
+        mercury_log_level = "warning";
+        mercury_log_subsys = "hg,rpc";
+        break;
+    default:
+        break;
+    }
+    if (NULL != mercury_log_level) {
+        HG_Set_log_level(mercury_log_level);
+        if (NULL != mercury_log_subsys) {
+            HG_Set_log_subsys(mercury_log_subsys);
+        }
+    }
+#endif
 
     return rc;
 }
