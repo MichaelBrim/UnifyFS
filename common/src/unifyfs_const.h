@@ -70,8 +70,8 @@
 #define UNIFYFS_METADATA_CACHE_SECONDS 5 /* cached metadata valid for 5 sec */
 
 // Server
-#define UNIFYFS_SERVER_MAX_BULK_TX_SIZE (8 * MIB) /* to-server transmit size */
-#define UNIFYFS_SERVER_MAX_DATA_TX_SIZE (4 * MIB) /* to-client transmit size */
+#define UNIFYFS_SERVER_MAX_BULK_TX_SIZE MIB /* to-server transmit size */
+#define UNIFYFS_SERVER_MAX_DATA_TX_SIZE MIB /* to-client transmit size */
 #define UNIFYFS_SERVER_MAX_NUM_APPS 64   /* max # apps/mountpoints supported */
 #define UNIFYFS_SERVER_MAX_APP_CLIENTS 256  /* max # clients per application */
 #define UNIFYFS_SERVER_MAX_READS 2048   /* max # server read reqs per reqmgr */
