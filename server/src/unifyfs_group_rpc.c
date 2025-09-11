@@ -1270,12 +1270,12 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
     hg_id_t op_hgid = unifyfsd_rpc_context->rpcs.extent_cache_bcast_id;
     hg_size_t buf_size = n_extents * sizeof(*extents);
     hg_bulk_t extents_bulk;
-    //void* buf = (void*) extents; 
+    void* buf = (void*) extents; 
     // MJB TESTING: make a copy to avoid reuse of cache as bulk across
     //              concurrent bcasts
-    void* buf = malloc((size_t)buf_size);
-    if (NULL != buf) {
-        memcpy(buf, (void*)extents, (size_t)buf_size);
+    //void* buf = malloc((size_t)buf_size);
+    //if (NULL != buf) {
+        //memcpy(buf, (void*)extents, (size_t)buf_size);
         hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid, 1,
                                              &buf, &buf_size,
                                              HG_BULK_READ_ONLY, &extents_bulk);
@@ -1283,7 +1283,7 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
             LOGERR("margo_bulk_create() failed - %s",
                    HG_Error_to_string(hret));
             ret = UNIFYFS_ERROR_MARGO;
-            free(buf);
+            //free(buf);
         } else {
             coll_request* coll = NULL;
             extent_cache_bcast_in_t* in = calloc(1, sizeof(*in));
@@ -1301,18 +1301,27 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
                 coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
                                          glb_pmi_rank, (void*)in, NULL,
                                          sizeof(extent_cache_bcast_out_t),
-                                         HG_BULK_NULL, extents_bulk, buf);
+                                         HG_BULK_NULL, extents_bulk, NULL//buf
+                                         );
                 if (NULL == coll) {
                     ret = ENOMEM;
                 } else {
+                    /* start the broadcast */
                     ret = collective_forward(coll);
                     if (ret == UNIFYFS_SUCCESS) {
-                        ret = invoke_bcast_progress_rpc(coll);
+                        /* progress/finish the bcast operation */
+                        LOGDBG("BCAST_RPC: bcast progress collective(%p)",
+                               coll);
+                        ret = collective_finish(coll);
+                        if (ret != UNIFYFS_SUCCESS) {
+                            LOGERR("finish failed for coll(%p) (rc=%d)",
+                                   coll, ret);
+                        }
                     }
                 }
             }
         }
-    }
+    //}
 
     return ret;
 }

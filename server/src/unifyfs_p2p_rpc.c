@@ -1056,6 +1056,8 @@ clear_pending_extents_get:
     return ret;
 }
 
+static struct timespec last_cache_bcast = (struct timespec) {0};
+
 static void process_get_extents_rpc(server_rpc_req_t* sreq)
 {
     int ret;
@@ -1090,9 +1092,16 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                 LOGDBG("owner has newer extents metadata");
                 send_extents = 1;
                 if (src_stamp.tv_sec == 0) {
-                    /* source timestamp is zero, time to broadcast */
-                    LOGDBG("broadcasting extents metadata to cache");
-                    ret = unifyfs_invoke_broadcast_extents_cache(gfid);
+                    /* source timestamp is zero, need to broadcast? */
+                    cmp = compare_timespec(&owner_stamp, &last_cache_bcast);
+                    if (0 != cmp) {
+                        last_cache_bcast = owner_stamp;
+                        LOGDBG("broadcasting extents metadata to cache");
+                        ret = unifyfs_invoke_broadcast_extents_cache(gfid);
+                        if (UNIFYFS_SUCCESS == ret) {
+                            send_extents = 0;
+                        }
+                    }
                 }
             } else if (-1 == cmp) {
                 /* source timestamp is newer, which should not happen.
