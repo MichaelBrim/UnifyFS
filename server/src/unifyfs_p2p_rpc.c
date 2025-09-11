@@ -1093,13 +1093,14 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                 send_extents = 1;
                 if (src_stamp.tv_sec == 0) {
                     /* source timestamp is zero, need to broadcast? */
+                    send_extents = 0;
                     cmp = compare_timespec(&owner_stamp, &last_cache_bcast);
                     if (0 != cmp) {
                         last_cache_bcast = owner_stamp;
                         LOGDBG("broadcasting extents metadata to cache");
                         ret = unifyfs_invoke_broadcast_extents_cache(gfid);
-                        if (UNIFYFS_SUCCESS == ret) {
-                            send_extents = 0;
+                        if (UNIFYFS_SUCCESS != ret) {
+                            send_extents = 1;
                         }
                     }
                 }
