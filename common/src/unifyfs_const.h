@@ -51,13 +51,13 @@
 #define UNIFYFS_CLIENT_STREAM_BUFSIZE MIB
 #define UNIFYFS_CLIENT_WRITE_INDEX_SIZE (20 * MIB)
 #define UNIFYFS_CLIENT_MAX_READ_COUNT 1000     /* max # active read requests */
-#define UNIFYFS_CLIENT_READ_TIMEOUT_SECONDS 60
+#define UNIFYFS_CLIENT_READ_TIMEOUT_SECONDS 30
 #define UNIFYFS_CLIENT_MAX_ACTIVE_REQUESTS 256 /* max concurrent client reqs */
 
 // Log-based I/O Default Values
-#define UNIFYFS_LOGIO_CHUNK_SIZE (4 * MIB)
+#define UNIFYFS_LOGIO_CHUNK_SIZE MIB
 #define UNIFYFS_LOGIO_SHMEM_SIZE (256 * MIB)
-#define UNIFYFS_LOGIO_SPILL_SIZE (4 * GIB)
+#define UNIFYFS_LOGIO_SPILL_SIZE (2 * GIB)
 
 // Margo Default Values
 #define UNIFYFS_MARGO_POOL_SZ 4
@@ -67,13 +67,13 @@
 #define UNIFYFS_MARGO_SERVICE_TIMEOUT_MSEC 15000  /* 15 sec */
 
 // Metadata Default Values
-#define UNIFYFS_METADATA_CACHE_SECONDS 5 /* cached metadata valid for 5 sec */
+#define UNIFYFS_METADATA_CACHE_SECONDS 10 /* metadata cache valid for 10 sec */
 
 // Server
 #define UNIFYFS_SERVER_MAX_BULK_TX_SIZE (4 * MIB) /* to-server transmit size */
 #define UNIFYFS_SERVER_MAX_DATA_TX_SIZE (8 * MIB) /* to-client transmit size */
 #define UNIFYFS_SERVER_MAX_NUM_APPS 64   /* max # apps/mountpoints supported */
-#define UNIFYFS_SERVER_MAX_APP_CLIENTS 256  /* max # clients per application */
+#define UNIFYFS_SERVER_MAX_APP_CLIENTS 256  /* max # clients per app */
 #define UNIFYFS_SERVER_MAX_READS 2048   /* max # server read reqs per reqmgr */
 
 // Utilities

@@ -112,8 +112,8 @@ const char* io_pattern_str(int pattern)
 }
 
 #define DEFAULT_IO_CHUNK_SIZE (MIB) // 1 MiB
-#define DEFAULT_IO_BLOCK_SIZE (16 * DEFAULT_IO_CHUNK_SIZE) // 16 MiB
-#define DEFAULT_IO_NUM_BLOCKS (32) // 32 blocks x 16 MiB = 512 MiB
+#define DEFAULT_IO_BLOCK_SIZE (64 * DEFAULT_IO_CHUNK_SIZE) // 64 MiB
+#define DEFAULT_IO_NUM_BLOCKS (4) // 4 blocks x 64 MiB = 256 MiB
 
 typedef struct {
     /* program behavior options */
