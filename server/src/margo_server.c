@@ -469,19 +469,19 @@ int margo_server_rpc_init(void)
 
     /* set mercury log output using current log level */
     const char* mercury_log_level = NULL;
-    const char* mercury_log_subsys = NULL;
+    const char* mercury_log_subsys = "hg,bulk";
     switch (unifyfs_log_level) {
     case LOG_DBG:
         mercury_log_level = "debug";
+#if defined(UNIFYFS_MERCURY_DEBUG)
         mercury_log_subsys = "hg,addr,bulk,na,proc,rpc"; // kitchen sink
+#endif
         break;
     case LOG_ERR:
         mercury_log_level = "error";
-        mercury_log_subsys = "hg,rpc";
         break;
     case LOG_WARN:
         mercury_log_level = "warning";
-        mercury_log_subsys = "hg,rpc";
         break;
     default:
         break;
