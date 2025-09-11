@@ -720,18 +720,57 @@ int get_extent_cache_chunks(unifyfs_extent_t* extent,
     /* search cache array for extents containing start and end offset */
     extent_metadata* em_begin = NULL;
     extent_metadata* em_end = NULL;
-    for (int i=0; i < (int)cache_sz; i++) {
-        extent_metadata* em = cache + i;
-        if ((NULL == em_begin) &&
-            (em->start <= ext_start_off) &&
-            (em->end >= ext_start_off)) {
-            em_begin = em;
-        }
-        if ((NULL == em_end) &&
-            (em->start <= ext_end_off) &&
-            (em->end >= ext_end_off)) {
-            em_end = em;
+
+    /* bisection search for extent containing start offset */
+    int start_ndx = 0;
+    int end_ndx = (int)cache_sz - 1;
+    int search_ndx;
+    int last_ndx = -1;
+    //LOGDBG("bisection search of extent cache array (sz=%zu)", cache_sz);
+    do {
+        // look at extent halfway between start and end indices
+        search_ndx = start_ndx + ((end_ndx - start_ndx) >> 1);
+        if (search_ndx < cache_sz) {
+            if (last_ndx == search_ndx) break;
+            last_ndx = search_ndx;
+            //LOGDBG("checking extent at index=%d", search_ndx);
+            extent_metadata* em = cache + search_ndx;
+            if (em->start <= ext_start_off) {
+                if (em->end >= ext_start_off) {
+                    //LOGDBG("found start extent at index=%d", search_ndx);
+                    em_begin = em;
+                    start_ndx = search_ndx;
+                    break;
+                } else { // go forward
+                    //LOGDBG("searching forward");
+                    start_ndx = search_ndx + 1;
+                }
+            } else { // go back 
+                //LOGDBG("searching backward");
+                end_ndx = search_ndx;
+            }
+        } else {
+            LOGERR("search went out of range, index=%d", search_ndx);
+            start_ndx = 0;
             break;
+        }
+    } while (1);
+
+    /* linear search from start for extent containing end offset */
+    for (int i = start_ndx; i < (int)cache_sz; i++) {
+        extent_metadata* em = cache + i;
+        if (NULL == em_begin) { // in case not found above
+            if ((em->start <= ext_start_off) &&
+                (em->end >= ext_start_off)) {
+                em_begin = em;
+            }
+        }
+        if (NULL == em_end) {
+            if ((em->start <= ext_end_off) &&
+                (em->end >= ext_end_off)) {
+                em_end = em;
+                break;
+            }
         }
     }
 
