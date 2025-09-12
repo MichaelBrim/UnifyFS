@@ -1119,30 +1119,23 @@ static void process_get_extents_rpc(server_rpc_req_t* sreq)
                 assert(mid != MARGO_INSTANCE_NULL);
 
                 hg_size_t buf_sz = num_extents * sizeof(extent_metadata);
-                void* buf = (void*) extents; 
-                // MJB TESTING: make a copy to avoid reuse of cache as bulk
-                //              across concurrent bcasts
-                //void* buf = malloc((size_t)buf_sz);
-                //if (NULL != buf) {
-                    //memcpy(buf, (void*)extents, (size_t)buf_sz);
-                    hg_bulk_t bulk_handle = HG_BULK_NULL;
-                    hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
-                                                         HG_BULK_READ_ONLY,
-                                                         &bulk_handle);
-                    if (hret != HG_SUCCESS) {
-                        LOGERR("margo_bulk_create() failed - %s",
-                               HG_Error_to_string(hret));
-                        ret = UNIFYFS_ERROR_MARGO;
-                        //free(buf);
-                    } else {
-                        /* set request output bulk for auto-free at cleanup */
-                        sreq->req_state->bulk = bulk_handle;
-                        sreq->req_state->bulk_buf = buf;
-                        bulk_resp_handle = bulk_handle;
-                        LOGDBG("returning %zu extents for gfid=%d to rank=%d",
-                            num_extents, gfid, sender);
-                    }
-                //}
+                void* buf = (void*) extents;
+                hg_bulk_t bulk_handle = HG_BULK_NULL;
+                hg_return_t hret = margo_bulk_create(mid, 1, &buf, &buf_sz,
+                                                     HG_BULK_READ_ONLY,
+                                                     &bulk_handle);
+                if (hret != HG_SUCCESS) {
+                    LOGERR("margo_bulk_create() failed - %s",
+                           HG_Error_to_string(hret));
+                    ret = UNIFYFS_ERROR_MARGO;
+                } else {
+                    /* set request output bulk for auto-free at cleanup */
+                    sreq->req_state->bulk = bulk_handle;
+                    sreq->req_state->bulk_buf = buf;
+                    bulk_resp_handle = bulk_handle;
+                    LOGDBG("returning %zu extents for gfid=%d to rank=%d",
+                        num_extents, gfid, sender);
+                }
             }
         }
     } else {
