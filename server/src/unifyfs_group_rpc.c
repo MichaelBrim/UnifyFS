@@ -1271,57 +1271,49 @@ int unifyfs_invoke_broadcast_extents_cache(int gfid)
     hg_size_t buf_size = n_extents * sizeof(*extents);
     hg_bulk_t extents_bulk;
     void* buf = (void*) extents; 
-    // MJB TESTING: make a copy to avoid reuse of cache as bulk across
-    //              concurrent bcasts
-    //void* buf = malloc((size_t)buf_size);
-    //if (NULL != buf) {
-        //memcpy(buf, (void*)extents, (size_t)buf_size);
-        hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid, 1,
-                                             &buf, &buf_size,
-                                             HG_BULK_READ_ONLY, &extents_bulk);
-        if (hret != HG_SUCCESS) {
-            LOGERR("margo_bulk_create() failed - %s",
-                   HG_Error_to_string(hret));
-            ret = UNIFYFS_ERROR_MARGO;
-            //free(buf);
+    hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->svr_mid, 1,
+                                         &buf, &buf_size,
+                                         HG_BULK_READ_ONLY, &extents_bulk);
+    if (hret != HG_SUCCESS) {
+        LOGERR("margo_bulk_create() failed - %s",
+               HG_Error_to_string(hret));
+        ret = UNIFYFS_ERROR_MARGO;
+    } else {
+        coll_request* coll = NULL;
+        extent_cache_bcast_in_t* in = calloc(1, sizeof(*in));
+        if (NULL == in) {
+            ret = ENOMEM;
         } else {
-            coll_request* coll = NULL;
-            extent_cache_bcast_in_t* in = calloc(1, sizeof(*in));
-            if (NULL == in) {
+            /* set input params */
+            in->root        = (int32_t) glb_pmi_rank;
+            in->gfid        = (int32_t) gfid;
+            in->extents     = extents_bulk;
+            in->num_extents = (int32_t) n_extents;
+            in->timestamp = ts;
+
+            server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE;
+            coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
+                                     glb_pmi_rank, (void*)in, NULL,
+                                     sizeof(extent_cache_bcast_out_t),
+                                     HG_BULK_NULL, extents_bulk, NULL);
+            if (NULL == coll) {
                 ret = ENOMEM;
             } else {
-                /* set input params */
-                in->root        = (int32_t) glb_pmi_rank;
-                in->gfid        = (int32_t) gfid;
-                in->extents     = extents_bulk;
-                in->num_extents = (int32_t) n_extents;
-                in->timestamp = ts;
-
-                server_rpc_e rpc = UNIFYFS_SERVER_BCAST_RPC_EXTENTS_CACHE;
-                coll = collective_create(rpc, HG_HANDLE_NULL, op_hgid,
-                                         glb_pmi_rank, (void*)in, NULL,
-                                         sizeof(extent_cache_bcast_out_t),
-                                         HG_BULK_NULL, extents_bulk, NULL//buf
-                                         );
-                if (NULL == coll) {
-                    ret = ENOMEM;
-                } else {
-                    /* start the broadcast */
-                    ret = collective_forward(coll);
-                    if (ret == UNIFYFS_SUCCESS) {
-                        /* progress/finish the bcast operation */
-                        LOGDBG("BCAST_RPC: bcast progress collective(%p)",
-                               coll);
-                        ret = collective_finish(coll);
-                        if (ret != UNIFYFS_SUCCESS) {
-                            LOGERR("finish failed for coll(%p) (rc=%d)",
-                                   coll, ret);
-                        }
+                /* start the broadcast */
+                ret = collective_forward(coll);
+                if (ret == UNIFYFS_SUCCESS) {
+                    /* progress/finish the bcast operation */
+                    LOGDBG("BCAST_RPC: bcast progress collective(%p)",
+                           coll);
+                    ret = collective_finish(coll);
+                    if (ret != UNIFYFS_SUCCESS) {
+                        LOGERR("finish failed for coll(%p) (rc=%d)",
+                               coll, ret);
                     }
                 }
             }
         }
-    //}
+    }
 
     return ret;
 }
