@@ -94,7 +94,8 @@ static margo_instance_id setup_remote_target(void)
 
     /* initialize margo */
     margo_instance_id mid = margo_init(server_addr, MARGO_SERVER_MODE,
-        margo_use_progress_thread, margo_service_pool_sz);
+                                       margo_use_progress_thread,
+                                       margo_service_pool_sz);
     if (mid == MARGO_INSTANCE_NULL) {
         LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed",
                server_addr, margo_use_progress_thread,
@@ -272,7 +273,8 @@ static margo_instance_id setup_local_target(void)
     /* initialize margo */
     const char* margo_protocol = PROTOCOL_MARGO_SHM;
     margo_instance_id mid = margo_init(margo_protocol, MARGO_SERVER_MODE,
-                     margo_use_progress_thread, margo_client_pool_sz);
+                                       margo_use_progress_thread,
+                                       margo_client_pool_sz);
     if (mid == MARGO_INSTANCE_NULL) {
         LOGERR("margo_init(%s, SERVER_MODE, %d, %d) failed", margo_protocol,
                margo_use_progress_thread, margo_client_pool_sz);
@@ -288,6 +290,7 @@ static margo_instance_id setup_local_target(void)
                HG_Error_to_string(hret));
     } else {
         self_string = get_margo_addr_str(mid, addr_self);
+        margo_addr_free(mid, addr_self);
     }
     if (NULL == self_string) {
         LOGERR("failed to get margo address string");
