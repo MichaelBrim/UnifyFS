@@ -749,6 +749,7 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
     //       files, but only use the gfids. The client must then issue
     //       a separate metaget request for each gfid.
     unifyfs_file_attr_t* file_attrs = NULL;
+    hg_bulk_t bulk_gfids = HG_BULK_NULL;
     int* new_gfid_list = NULL;
     int num_file_attrs = 0;
     ret = unifyfs_invoke_broadcast_metaget_all(&file_attrs,
@@ -760,7 +761,7 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
         new_gfid_list = (int*) calloc(num_file_attrs, sizeof(int));
         if (NULL != new_gfid_list) {
             /* initialize bulk handle for the gfid_list */
-            hg_bulk_t bulk_gfids;
+            
             hg_size_t sizes[1] = { num_file_attrs * sizeof(int) };
             void* ptrs[1] = { (void*)new_gfid_list };
             hret = margo_bulk_create(unifyfsd_rpc_context->shm_mid,
@@ -776,7 +777,7 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
                     new_gfid_list[i] = file_attrs[i].gfid;
                 }
                 out->bulk_gfids = bulk_gfids;
-                creq->req_state->bulk = bulk_gfids;
+                creq->req_state->bulk = bulk_gfids; // free on rpc cleanup
             }
         } else {
             ret = ENOMEM;
@@ -789,9 +790,9 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
     /* send rpc response and cleanup request state */
     sync_respond_client(creq, rpc_name);
     
-
-    if (NULL != new_gfid_list)
+    if (NULL != new_gfid_list) {
         free(new_gfid_list);
+    }
 
     if (NULL != file_attrs)
         free(file_attrs);
@@ -843,6 +844,7 @@ static void unifyfs_mount_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_mount_rpc(creq);
@@ -865,6 +867,7 @@ static void unifyfs_attach_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_attach_rpc(creq);
@@ -885,6 +888,7 @@ static void unifyfs_unmount_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_unmount_rpc(creq);
@@ -907,6 +911,7 @@ static void unifyfs_metaget_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_metaget_rpc(creq);
@@ -929,6 +934,7 @@ static void unifyfs_metaset_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_metaset_rpc(creq);
@@ -952,6 +958,7 @@ static void unifyfs_fsync_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_fsync_rpc(creq);
@@ -974,6 +981,7 @@ static void unifyfs_filesize_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_filesize_rpc(creq);
@@ -996,6 +1004,7 @@ static void unifyfs_transfer_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_transfer_rpc(creq);
@@ -1018,6 +1027,7 @@ static void unifyfs_truncate_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_truncate_rpc(creq);
@@ -1040,6 +1050,7 @@ static void unifyfs_unlink_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_unlink_rpc(creq);
@@ -1062,6 +1073,7 @@ static void unifyfs_laminate_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_laminate_rpc(creq);
@@ -1086,6 +1098,7 @@ static void unifyfs_mread_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_mread_rpc(creq);
@@ -1109,6 +1122,7 @@ static void unifyfs_read_extent_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_read_extent_rpc(creq);
@@ -1130,6 +1144,7 @@ static void unifyfs_get_gfids_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_gfids_rpc(creq);
@@ -1154,6 +1169,7 @@ static void unifyfs_node_local_extents_get_rpc(hg_handle_t handle)
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));
         }
+        margo_destroy(handle);
         return;
     }
     process_client_node_local_extents_rpc(creq);

@@ -487,7 +487,7 @@ void* pull_margo_bulk(hg_handle_t rpc_hdl,
     assert(mid != MARGO_INSTANCE_NULL);
 
     /* register local target buffer for bulk access */
-    hg_bulk_t bulk_local;
+    hg_bulk_t bulk_local = HG_BULK_NULL;
     hg_return_t hret = margo_bulk_create(mid, 1, &buffer, &bulk_sz,
                                          HG_BULK_READWRITE, &bulk_local);
     if (hret != HG_SUCCESS) {
