@@ -1315,17 +1315,12 @@ static int process_pending_sync(server_rpc_req_t* req)
                 pending_extents_item* pei = (pending_extents_item*) item;
                 client_rpc_req_t* creq = pei->client_req;
 
-                /* send rpc response to requesting client */
-                unifyfs_fsync_out_t out;
-                out.ret = (int32_t) ret;
-                hg_return_t hret = margo_respond(creq->req_state->handle, &out);
-                if (hret != HG_SUCCESS) {
-                    LOGERR("margo_respond() failed");
-                }
+                unifyfs_fsync_out_t* out = creq->req_state->outputs;
+                out->ret = (int32_t) ret;
 
-                /* cleanup req */
-                margo_destroy(creq->req_state->handle);
-                free(creq);
+                /* send rpc response to requesting client and cleanup */
+                const char* rpc_name = "unifyfs_fsync";
+                sync_respond_client(creq, rpc_name);
             }
         }
 

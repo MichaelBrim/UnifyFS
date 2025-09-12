@@ -401,7 +401,6 @@ add_pending_unlock_inode:
     LOGINFO("added %d pending extents to inode (gfid=%d)",
             num_extents, gfid);
 
-
     return ret;
 }
 

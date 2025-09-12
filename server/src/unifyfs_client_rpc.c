@@ -512,7 +512,6 @@ void process_client_fsync_rpc(client_rpc_req_t* creq)
     
         /* send rpc response and cleanup request state */
         sync_respond_client(creq, rpc_name);
-        
     }
     // else, some other thread will update the extent metadata
     //       and respond when the sync has completed
@@ -952,7 +951,7 @@ static void unifyfs_fsync_rpc(hg_handle_t handle)
                                   sizeof(unifyfs_fsync_in_t),
                                   sizeof(unifyfs_fsync_out_t));
     if (NULL == creq) {
-        unifyfs_filesize_out_t out;
+        unifyfs_fsync_out_t out;
         out.ret = (int32_t) ENOMEM;
         hg_return_t hret = margo_respond(handle, &out);
         if (hret != HG_SUCCESS) {
