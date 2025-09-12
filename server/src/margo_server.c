@@ -123,6 +123,7 @@ static margo_instance_id setup_remote_target(void)
                HG_Error_to_string(hret));
     } else {
         self_string = get_margo_addr_str(mid, addr_self);
+        margo_addr_free(mid, addr_self);
     }
     if (NULL == self_string) {
         LOGERR("failed to get margo address string");
