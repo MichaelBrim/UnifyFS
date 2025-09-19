@@ -332,9 +332,9 @@ MERCURY_GEN_PROC(unifyfs_node_local_extents_get_in_t,
                  ((int32_t)(gfid)))
 MERCURY_GEN_PROC(unifyfs_node_local_extents_get_out_t,
                  ((int32_t)(ret))
-                 ((hg_size_t)(chunk_count))
-                 ((hg_bulk_t)(bulk_data))
-                 ((hg_size_t)(bulk_size)))
+                 ((hg_size_t)(ext_count))
+                 ((hg_size_t)(bulk_size))
+                 ((hg_bulk_t)(bulk_extents)))
 DECLARE_MARGO_RPC_HANDLER(unifyfs_node_local_extents_get_rpc)
 
 /* unifyfs_get_gfids_rpc (client => server)

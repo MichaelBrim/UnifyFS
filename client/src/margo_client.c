@@ -958,8 +958,8 @@ int invoke_client_node_local_extents_get_rpc(unifyfs_client* client,
         LOGDBG("%s got response ret=%" PRIi32, rpc_name, out.ret);
         ret = (int) out.ret;
         if (ret == (int) UNIFYFS_SUCCESS) {
-            *chunk_count = out.chunk_count;
-            void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_data,
+            *chunk_count = out.ext_count;
+            void* out_buffer = pull_margo_bulk(rpc->handle, out.bulk_extents,
                                                out.bulk_size, NULL);
             *chunks = (unifyfs_data_chunk_t*) out_buffer;
         }

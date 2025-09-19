@@ -748,7 +748,6 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
     //       files, but only use the gfids. The client must then issue
     //       a separate metaget request for each gfid.
     unifyfs_file_attr_t* file_attrs = NULL;
-    hg_bulk_t bulk_gfids = HG_BULK_NULL;
     int* new_gfid_list = NULL;
     int num_file_attrs = 0;
     ret = unifyfs_invoke_broadcast_metaget_all(&file_attrs,
@@ -759,12 +758,15 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
         // Package all the gfids up into one list
         new_gfid_list = (int*) calloc(num_file_attrs, sizeof(int));
         if (NULL != new_gfid_list) {
-            /* initialize bulk handle for the gfid_list */
+            for (int i=0; i < num_file_attrs; i++) {
+                new_gfid_list[i] = file_attrs[i].gfid;
+            }
             
-            hg_size_t sizes[1] = { num_file_attrs * sizeof(int) };
-            void* ptrs[1] = { (void*)new_gfid_list };
+            /* initialize bulk for the gfid_list */
+            hg_bulk_t bulk_gfids = HG_BULK_NULL;
+            hg_size_t bulk_sz = (hg_size_t) num_file_attrs * sizeof(int);
             hret = margo_bulk_create(unifyfsd_rpc_context->shm_mid,
-                                     1, ptrs, sizes,
+                                     1, (void**)&new_gfid_list, &bulk_sz,
                                      HG_BULK_READ_ONLY, &bulk_gfids);
             if (hret != HG_SUCCESS) {
                 LOGDBG("margo_bulk_create() failed - %s",
@@ -772,11 +774,10 @@ void process_client_gfids_rpc(client_rpc_req_t* creq)
                 free(new_gfid_list);
                 ret = UNIFYFS_ERROR_MARGO;
             } else {
-                for (int i=0; i < num_file_attrs; i++) {
-                    new_gfid_list[i] = file_attrs[i].gfid;
-                }
                 out->bulk_gfids = bulk_gfids;
-                creq->req_state->bulk = bulk_gfids; // free on rpc cleanup
+
+                /* request bulk free on rpc cleanup */
+                creq->req_state->bulk = bulk_gfids;
             }
         } else {
             ret = ENOMEM;
@@ -806,9 +807,38 @@ void process_client_node_local_extents_rpc(client_rpc_req_t* creq)
     unifyfs_node_local_extents_get_out_t* out = creq->req_state->outputs;
     assert((in != NULL) && (out != NULL));
 
-    /* MJB TODO - rewrite to take a single gfid and return the local extents
-     *            if the file is laminated and has not been reverse-synced */
-    ret = UNIFYFS_ERROR_NYI;
+    unifyfs_fops_ctx_t ctx = {
+        .client_req = creq,
+        .app_id     = in->app_id,
+        .client_id  = in->client_id,
+    };
+
+    int gfid = (int) in->gfid;
+    size_t n_extents = 0;
+    unifyfs_data_chunk_t* extents = NULL;
+    ret = unifyfs_fops_local_extents(&ctx, gfid, &n_extents, &extents);
+    if (ret != UNIFYFS_SUCCESS) {
+        LOGERR("unifyfs_fops_local_extents() failed");
+    } else {
+        out->ext_count = (hg_size_t) n_extents;
+
+        /* register user buffer for bulk access */
+        hg_bulk_t bulk_local;
+        hg_size_t bulk_sz = (hg_size_t) n_extents * sizeof(unifyfs_data_chunk_t);
+        hg_return_t hret = margo_bulk_create(unifyfsd_rpc_context->shm_mid,
+                                             1, (void**)&extents, &bulk_sz,
+                                             HG_BULK_READ_ONLY, &bulk_local);
+        if (hret != HG_SUCCESS) {
+            LOGERR("margo_bulk_create() failed");
+            ret = UNIFYFS_ERROR_MARGO;
+        } else {
+            out->bulk_extents = bulk_local;
+            out->bulk_size = bulk_sz;
+
+            /* request bulk free on rpc cleanup */
+            creq->req_state->bulk = bulk_local;
+        }
+    }
 
     out->ret = (int32_t) ret;
 
@@ -1163,7 +1193,7 @@ static void unifyfs_node_local_extents_get_rpc(hg_handle_t handle)
     if (NULL == creq) {
         unifyfs_node_local_extents_get_out_t out;
         out.ret = (int32_t) ENOMEM;
-        out.chunk_count = 0;
+        out.ext_count = 0;
         hg_return_t hret = margo_respond(handle, &out);
         if (hret != HG_SUCCESS) {
             LOGERR("margo_respond() failed - %s", HG_Error_to_string(hret));

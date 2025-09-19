@@ -58,7 +58,6 @@ typedef int (*unifyfs_fops_read_t)(unifyfs_fops_ctx_t* ctx,
                                    size_t* coverage_begin_offset,
                                    size_t* coverage_end_offset);
 
-
 typedef int (*unifyfs_fops_transfer_t)(unifyfs_fops_ctx_t* ctx,
                                        int transfer_id,
                                        int gfid,
@@ -72,6 +71,11 @@ typedef int (*unifyfs_fops_unlink_t)(unifyfs_fops_ctx_t* ctx, int gfid);
 
 typedef int (*unifyfs_fops_get_gfids_t)(int** gfid_list, int* num_gfids);
 
+typedef int (*unifyfs_fops_local_extents_t)(unifyfs_fops_ctx_t* ctx,
+                                            int gfid,
+                                            size_t* ext_count,
+                                            unifyfs_data_chunk_t** extents);
+
 struct unifyfs_fops {
     const char* name;
     unifyfs_fops_init_t init;
@@ -79,6 +83,7 @@ struct unifyfs_fops {
     unifyfs_fops_fsync_t fsync;
     unifyfs_fops_get_gfids_t get_gfids;
     unifyfs_fops_laminate_t laminate;
+    unifyfs_fops_local_extents_t local_extents;
     unifyfs_fops_metaget_t metaget;
     unifyfs_fops_metaset_t metaset;
     unifyfs_fops_mread_t mread;
@@ -143,6 +148,18 @@ static inline int unifyfs_fops_laminate(unifyfs_fops_ctx_t* ctx, int gfid)
     }
 
     return global_fops_tab->laminate(ctx, gfid);
+}
+
+static inline int unifyfs_fops_local_extents(unifyfs_fops_ctx_t* ctx,
+                                             int gfid,
+                                             size_t* ext_count,
+                                             unifyfs_data_chunk_t** extents)
+{
+    if (!global_fops_tab->local_extents) {
+        return ENOSYS;
+    }
+
+    return global_fops_tab->local_extents(ctx, gfid, ext_count, extents);
 }
 
 static inline int unifyfs_fops_metaget(unifyfs_fops_ctx_t* ctx,

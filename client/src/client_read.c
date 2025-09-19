@@ -701,7 +701,7 @@ int process_gfid_reads(unifyfs_client* client,
 
                 meta->needs_reads_sync = 0;
 
-                /* MJB TODO - rewrite to request local extents for single gfid */
+                /* request local extents for single gfid */
                 size_t chunk_count = 0;
                 unifyfs_data_chunk_t* chunks = NULL;
                 rc = invoke_client_node_local_extents_get_rpc(client,

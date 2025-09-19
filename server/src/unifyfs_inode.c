@@ -777,7 +777,8 @@ int get_extent_cache_chunks(unifyfs_extent_t* extent,
         /* found begin and end extents, convert to chunks */
         int gap_found = 0;
         int n_chk = 1 + (em_end - em_begin);
-        unifyfs_data_chunk_t* chks = calloc(n_chk, sizeof(*chks));
+        unifyfs_data_chunk_t* chks = (unifyfs_data_chunk_t*) 
+            calloc(n_chk, sizeof(unifyfs_data_chunk_t));
         if (NULL != chks) {
             extent_metadata* em_prev;
             extent_metadata* em_iter = em_begin;

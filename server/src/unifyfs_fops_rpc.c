@@ -490,20 +490,86 @@ int rpc_get_gfids(
     return unifyfs_get_gfids(num_gfids, gfid_list);
 }
 
+static
+int rpc_local_extents(unifyfs_fops_ctx_t* ctx,
+                      int gfid,
+                      size_t* ext_count,
+                      unifyfs_data_chunk_t** extents)
+{
+    int ret;
+
+    assert((NULL != ext_count) && (NULL != extents));
+
+    *ext_count = 0;
+    *extents = NULL;
+
+    /* define extent covering whole file */
+    unifyfs_file_attr_t attrs;
+    memset(&attrs, 0, sizeof(attrs));
+    int rc = sm_get_fileattr(gfid, &attrs);
+    if (rc == UNIFYFS_SUCCESS) {
+        unifyfs_extent_t whole_file = {
+            .gfid = gfid,
+            .length = attrs.size,
+            .offset = 0
+        };
+
+        /* get all file extents */
+        unsigned int n_chunks = 0;
+        unifyfs_data_chunk_t* chunks = NULL;
+        int coverage;
+        rc = unifyfs_inode_get_extent_chunks(&whole_file,
+                                             &n_chunks, &chunks,
+                                             &coverage);
+        if ((UNIFYFS_SUCCESS == rc) && (n_chunks > 0)) {
+            /* find local chunks */
+            unsigned int n_local = 0;
+            unifyfs_data_chunk_t* local_chunks = (unifyfs_data_chunk_t*)
+                calloc(n_chunks, sizeof(unifyfs_data_chunk_t));
+            if (NULL == local_chunks) {
+                ret = ENOMEM;
+            } else {
+                for (unsigned int i=0; i < n_chunks; i++) {
+                    unifyfs_data_chunk_t* chk = chunks + i;
+                    unifyfs_data_chunk_t* lchk = local_chunks + n_local;
+                    if (chk->log_server == glb_pmi_rank) {
+                        *lchk = *chk;
+                        n_local++;
+                    }
+                }
+                ret = UNIFYFS_SUCCESS;
+            }
+            *ext_count = (size_t) n_local;
+            *extents = local_chunks;
+
+            /* release chunks array */
+            free(chunks);
+        } else {
+            ret = rc;
+        }
+    } else {
+        /* gfid not found, so we have no local extents */
+        ret = UNIFYFS_SUCCESS;
+    }
+
+    return ret;
+}
+
 static struct unifyfs_fops _fops_rpc = {
-    .name      = "rpc",
-    .init      = rpc_init,
-    .filesize  = rpc_filesize,
-    .fsync     = rpc_fsync,
-    .get_gfids = rpc_get_gfids,
-    .laminate  = rpc_laminate,
-    .metaget   = rpc_metaget,
-    .metaset   = rpc_metaset,
-    .mread     = rpc_mread,
-    .read      = rpc_read,
-    .transfer  = rpc_transfer,
-    .truncate  = rpc_truncate,
-    .unlink    = rpc_unlink
+    .name          = "rpc",
+    .init          = rpc_init,
+    .filesize      = rpc_filesize,
+    .fsync         = rpc_fsync,
+    .get_gfids     = rpc_get_gfids,
+    .laminate      = rpc_laminate,
+    .local_extents = rpc_local_extents,
+    .metaget       = rpc_metaget,
+    .metaset       = rpc_metaset,
+    .mread         = rpc_mread,
+    .read          = rpc_read,
+    .transfer      = rpc_transfer,
+    .truncate      = rpc_truncate,
+    .unlink        = rpc_unlink
 };
 
 struct unifyfs_fops* unifyfs_fops_impl = &_fops_rpc;
